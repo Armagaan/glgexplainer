@@ -19,7 +19,7 @@ class LocalExplanationsDataset(InMemoryDataset):
             if feature_type == "same":
                 features = torch.full((adj.shape[0], 5), 0.1)
             elif feature_type == "weights_sum": #for each node sum the edge weights
-                G = nx.from_numpy_matrix(adj)
+                G = nx.from_numpy_array(adj)
                 weights = nx.get_edge_attributes(G, 'weight')
                 features = torch.zeros(len(G.nodes()))
                 for n in G.nodes():
@@ -33,7 +33,7 @@ class LocalExplanationsDataset(InMemoryDataset):
                     features[n] = total
                 features = features.reshape(-1, 1)
             elif feature_type == "features":
-                G = nx.from_numpy_matrix(adj)
+                G = nx.from_numpy_array(adj)
                 features = torch.zeros((len(G.nodes()), 5))
                 
                 d = nx.density(G)
@@ -48,7 +48,7 @@ class LocalExplanationsDataset(InMemoryDataset):
             elif feature_type == "embeddings":
                 features = torch.tensor(precomputed_embeddings[i])
             
-            t = from_networkx(nx.from_numpy_matrix(adj))
+            t = from_networkx(nx.from_numpy_array(adj))
             data = Data(x=features, 
                         edge_index=t.edge_index, 
                         edge_attr=torch.tensor(t.weight).reshape(-1, 1),
@@ -203,10 +203,10 @@ def CEWithLogitsLoss(logits, targets, gamma, alpha):
     return loss
 
 @torch.no_grad()
-def get_cluster_accuracy(concept_predictions, classes):
+def get_cluster_accuracy(concept_predictions, classes): #! This doesn't match the definition of concept purity presented in the paper.
     accs = []
     for cl in np.unique(concept_predictions):
-        _ , counts = np.unique(classes[concept_predictions == cl], return_counts=True)            
+        _ , counts = np.unique(classes[concept_predictions == cl], return_counts=True) #! This line should be removed. The rest matches with the paper.
         accs.append(np.max(counts) / np.sum(counts))
     return accs
 
@@ -249,7 +249,7 @@ def plot_molecule(data, adj=None, node_features=None, composite_plot=False):
     if adj is None and node_features is None:
         G = to_networkx(data)
     else:
-        G = nx.from_numpy_matrix(adj)
+        G = nx.from_numpy_array(adj)
     node_label = data.x.argmax(-1) if node_features is None else node_features.argmax(-1)
     max_label = node_label.max() + 1
     nmb_nodes = len(node_label)

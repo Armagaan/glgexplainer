@@ -16,8 +16,6 @@ import time
 import utils
 
 
-
-
 class GLGExplainer(torch.nn.Module):
     """
         Implementation of GLGExplainer (https://arxiv.org/abs/2210.07147)
@@ -83,8 +81,8 @@ class GLGExplainer(torch.nn.Module):
         else:
             return concept_vector , le_embeddings
 
-    
-    def train_epoch(self, loader, train=True):   
+
+    def train_epoch(self, loader, train=True):
         if train:
             self.train()
         else:
@@ -124,12 +122,15 @@ class GLGExplainer(torch.nn.Module):
             acc_per_class = 0
             acc_overall = accuracy_score(trues.cpu(), preds.argmax(-1).cpu())
         else:
-            acc_per_class = accuracy_score(trues.argmax(-1).cpu(), preds.argmax(-1).cpu()) 
-            acc_overall   = sum(trues[:, :].eq(preds[:, :] > 0).sum(1) == self.num_classes) / len(preds) # it checks that the LEN predicted only one class. acc_per_class instead consider a sample correct even if the LEN fires both classes
+            acc_per_class = accuracy_score(trues.argmax(-1).cpu(), preds.argmax(-1).cpu())
+            # it checks that the LEN predicted only one class.
+            # acc_per_class instead consider a sample correct even if the LEN fires both classes
+            acc_overall   = sum(trues[:, :].eq(preds[:, :] > 0).sum(1) == self.num_classes) / len(preds)
         
         cluster_acc = utils.get_cluster_accuracy(
             total_prototype_assignements.argmax(1).detach().cpu().numpy(), 
-            le_classes.cpu())
+            le_classes.cpu()
+        )
 
         metrics                           = {k: v.item() / len(loader) for k , v in total_losses.items()}
         metrics["acc_per_class"]          = acc_per_class
@@ -191,36 +192,54 @@ class GLGExplainer(torch.nn.Module):
         for epoch in range(1, self.hyper["num_epochs"]):
             train_metrics = self.train_epoch(train_loader)
             val_metrics   = self.train_epoch(val_loader, train=False)
-            
+
             if epoch % 20 == 0:
                 self.inspect(train_loader, self.hyper["log_wandb"], plot=plot)
                 self.inspect(val_loader, log_wandb=False, plot=False, is_train_set=False)
-                
+
             self.temp -= (self.hyper["ts"] - self.hyper["te"]) / self.hyper["num_epochs"]
+
             if self.hyper["log_wandb"] and self.hyper["log_models"]:
                 torch.save(self.state_dict(), f"{wandb.run.dir}/epoch_{epoch}.pt")  
+
             if val_metrics["loss"] < best_val_loss and self.hyper["log_models"]:
                 best_val_loss = val_metrics["loss"]
-                torch.save(self.state_dict(), f"../trained_models/best_so_far/best_so_far_{self.dataset_name}_epoch_{epoch}.pt")
+                torch.save(
+                    self.state_dict(),
+                    f"../trained_models/best_so_far/best_so_far_"
+                    f"{self.dataset_name}_epoch_{epoch}.pt"
+                )
 
-            print(f'{epoch:3d}: Loss: {train_metrics["loss"]:.5f}, LEN: {train_metrics["len_loss"]:2f}, Acc: {train_metrics["acc_overall"]:.2f}, V. Acc: {val_metrics["acc_overall"]:.2f}, V. Loss: {val_metrics["loss"]:.5f}, V. LEN {val_metrics["len_loss"]:.3f}')
-                
+            print(
+                f'{epoch:3d} |'
+                f' Train Acc: {train_metrics["acc_overall"]:.2f},'
+                f' Train Loss: {train_metrics["loss"]:.5f},'
+                f' Train LEN loss: {train_metrics["len_loss"]:2f}, |'
+                f' Val Acc: {val_metrics["acc_overall"]:.2f},'
+                f' Val Loss: {val_metrics["loss"]:.5f},'
+                f' Val LEN loss: {val_metrics["len_loss"]:.3f}'
+            )
+
             if self.early_stopping.on_epoch_end(epoch, val_metrics["loss"]):
                 print(f"Early Stopping")
                 print(f"Loading model at epoch {self.early_stopping.best_epoch}")
                 if self.hyper["log_models"]:
-                    self.load_state_dict(torch.load(f"../trained_models/best_so_far/best_so_far_{self.dataset_name}_epoch_{self.early_stopping.best_epoch}.pt"))
+                    self.load_state_dict(torch.load(
+                        f"../trained_models/best_so_far/best_so_far_"
+                        f"{self.dataset_name}_epoch_{self.early_stopping.best_epoch}.pt"
+                    ))
                 else:
                     print("Model not loaded")
                 break
+
         print(f"Best epoch: {self.early_stopping.best_epoch}")   
         print(f"Trained lasted for {round(time.time() - start_time)} seconds")
-                
+ 
         if self.hyper["log_wandb"]:
             if self.hyper["log_models"]:
                 wandb.save(f'{wandb.run.dir}/epoch_*.pt')
             self.run.finish()  
-        
+
         # if save_metrics:
         #     with open(f'../logs/ablation/num_proto/{self.dataset_name}/{self.hyper["num_prototypes"]}_train_metrics.pkl', 'wb') as handle:
         #         pickle.dump(self.train_metrics, handle)
@@ -420,16 +439,20 @@ class GLGExplainer(torch.nn.Module):
         else:
             distribution_entropy_loss = torch.tensor(0., device=self.device)
 
-        loss = len_loss + logic_loss   + prototype_distance_loss + r1_loss + r2_loss + concept_entropy_loss + div_loss + distribution_entropy_loss
+        loss = len_loss + logic_loss + prototype_distance_loss + r1_loss + r2_loss \
+            + concept_entropy_loss + div_loss + distribution_entropy_loss
         total_losses["loss"] += loss.detach()
-        return loss , y_pred
-        
+        return loss, y_pred
+
+
     def log(self, msg):
         wandb.log(msg)
+
 
     def eval(self):
         self.le_model.eval()
         self.len_model.eval()
+
 
     def train(self):
         self.le_model.train()
@@ -512,8 +535,6 @@ class LEEmbedder(torch.nn.Module):
             x = self.actv(self.convs[i](x.float(), edge_index))
         return x
 
-    
-
 
 def LEN(input_shape, temperature, n_classes=2, remove_attention=False):
     layers = [
@@ -524,9 +545,3 @@ def LEN(input_shape, temperature, n_classes=2, remove_attention=False):
         torch.nn.Linear(5, 1),
     ]
     return torch.nn.Sequential(*layers)
-
-
-
-
-
-

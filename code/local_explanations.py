@@ -7,7 +7,8 @@ from networkx.generators import classic
 from collections import defaultdict
 import utils
 
-base = "../local_explanations/"
+# base = "../local_explanations/"
+base = "../our_data/local_explanations/"
 
 house = nx.Graph()
 house.add_edge(0, 1)
@@ -135,7 +136,16 @@ def evaluate_cutting(ori_adjs, adjs):
     return round(num_preserved/num_shapes, 3)
 
 
-def read_bamultishapes(explainer="PGExplainer", dataset="BAMultiShapes", model="GCN", split="TRAIN", evaluate_method=False, remove_mix=False, min_num_include=5, manual_cut=None):
+def read_bamultishapes(
+    explainer="PGExplainer",
+    dataset="BAMultiShapes",
+    model="GCN",
+    split="TRAIN",
+    evaluate_method=False,
+    remove_mix=False,
+    min_num_include=5,
+    manual_cut=None
+):
     """read local explanations and cut them based on a certain policy"""
     base_path = base + f"{explainer}/{dataset}/{model}/"
     adjs, edge_weights, index_stopped = [], [], []
@@ -160,52 +170,59 @@ def read_bamultishapes(explainer="PGExplainer", dataset="BAMultiShapes", model="
                 # emb = np.load(path_emb + c + "/" + str(graph_id) + ".pkl", allow_pickle=True)
                 # gnn_embeddings.append(emb)
 
-                cut = elbow_method(np.triu(adj).flatten(
-                ), index_stopped, min_num_include) if manual_cut is None else manual_cut
+                if manual_cut is None:
+                    cut = elbow_method(np.triu(adj).flatten(), index_stopped, min_num_include)
+                else:
+                    cut = manual_cut
+
                 masked = copy.deepcopy(adj)
                 masked[masked <= cut] = 0
                 masked[masked > cut] = 1
                 G = nx.from_numpy_array(masked)
 
                 added = 0
-                graph_labels = label_explanation(
-                    g, house, grid, wheel, return_raw=True)
+                graph_labels = label_explanation(g, house, grid, wheel, return_raw=True)
                 gnn_pred = int(pp.split("_")[0])
+
                 # if gnn_pred != int(c):
                 #    summary_predictions["wrong"].append(assign_class(graph_labels))
                 #    continue
                 summary_predictions["correct"].append(
                     assign_class(graph_labels))
+
                 total_cc_labels.append([])
                 cc_labels = []
                 for cc in nx.connected_components(G):
-                    if len(cc) > 2:
-                        G1 = G.subgraph(cc)
-                        if not nx.diameter(G1) == len(G1.edges()):  # if is not a line
-                            cc_lbl = label_explanation(
-                                G1, house, grid, wheel, return_raw=True)
-                            if remove_mix and assign_class(cc_lbl) >= 4:
-                                num_multi_shapes_removed += 1
-                                if added:
-                                    print("added = ", added)
-                                    del adjs[-1], edge_weights[-1], belonging[-1], total_cc_labels[-1], le_classes[-1]
-                                    added = 0
-                                break
-                            added += 1
-                            cc_labels.extend(cc_lbl)
-                            total_cc_labels[-1].extend(cc_lbl)
-                            adjs.append(nx.to_numpy_array(G1))
-                            edge_weights.append(
-                                nx.get_edge_attributes(G1, "weight"))
-                            belonging.append(num_iter)
-                            le_classes.append(assign_class(cc_lbl))
+                    if len(cc) <= 2:
+                        continue
 
-                            if gnn_embeddings != []:
-                                nodes_to_keep = list(G1.nodes())
-                                to_keep = gnn_embeddings[-1][nodes_to_keep]
-                                precomputed_embeddings.append(to_keep)
+                    G1 = G.subgraph(cc)
+                    if not nx.diameter(G1) == len(G1.edges()):  # if is not a line
+                        cc_lbl = label_explanation(G1, house, grid, wheel, return_raw=True)
+                        if remove_mix and assign_class(cc_lbl) >= 4:
+                            num_multi_shapes_removed += 1
+                            if added:
+                                print("added = ", added)
+                                del adjs[-1], edge_weights[-1], belonging[-1], \
+                                    total_cc_labels[-1], le_classes[-1]
+                                added = 0
+                            break
+                        added += 1
+                        cc_labels.extend(cc_lbl)
+                        total_cc_labels[-1].extend(cc_lbl)
+                        adjs.append(nx.to_numpy_array(G1))
+                        edge_weights.append(nx.get_edge_attributes(G1, "weight"))
+                        belonging.append(num_iter)
+                        le_classes.append(assign_class(cc_lbl))
+
+                        if gnn_embeddings != []:
+                            nodes_to_keep = list(G1.nodes())
+                            to_keep = gnn_embeddings[-1][nodes_to_keep]
+                            precomputed_embeddings.append(to_keep)
+
                 if total_cc_labels[-1] == []:
                     del total_cc_labels[-1]
+
                 if added:
                     if graph_labels != []:
                         total_graph_labels.append(graph_labels)
@@ -218,7 +235,9 @@ def read_bamultishapes(explainer="PGExplainer", dataset="BAMultiShapes", model="
                         if lbl not in cc_labels:
                             num_class_relationship_broken += 1
                             break
+
                 cont_num_iter += 1
+
     belonging = utils.normalize_belonging(belonging)
     if evaluate_method:
         evaluate_cutting(ori_adjs, adjs)
@@ -276,70 +295,104 @@ def read_mutagenicity(
                     # The local explainer couldn't find an explanation.
                     # The explanatin grpah doesn't contain any edges.
                     continue
-                else:
-                    added = 0
-                    for cc in connected_components:
-                        # exclude cc containing a single node
-                        if len(cc) < 2:
+
+                added = 0
+                for cc in connected_components:
+                    # exclude cc containing a single node
+                    if len(cc) < 2:
+                        continue
+
+                    G1 = G.subgraph(cc)
+                    if len(G1.nodes()) >= len(G.nodes()) - 3:
+                        # ad-hoc decision.
+                        continue
+
+                    nodes_to_keep = list(G1.nodes())
+                    # to_keep = embedding[nodes_to_keep]
+                    to_keep = features[nodes_to_keep]
+                    for n in nodes_to_keep:
+                        G1.nodes[n]["atom_type"] = features[n].argmax(-1)
+                    
+                    """ Let everyone be the same le_class
+                    le_classes.append(1)
+                    """
+
+                    # """ Let NH2 pass
+                    pattern_found = False
+                    for pattern in [pattern_nh2, pattern_no2]:
+                        if pattern_found:
+                            break
+                        GM = isomorphism.GraphMatcher(
+                            G1,
+                            pattern,
+                            node_match=isomorphism.categorical_node_match(['atom_type'], [0])
+                        )
+                        if GM.subgraph_is_isomorphic():
+                            pattern_found = True
+                            # Append 0 if NH2 is found and break
+                            # Append 1 if NO2 is found and break
+                            le_classes.append(1)
+                    if not pattern_found:
+                        # Append 2 if neither is found
+                        le_classes.append(2)
+                    # """
+
+
+                    #* This is the "annotation" part mentioned in the paper.
+                    """ Don't let NH2 pass
+                    pattern_found = False
+                    for i, pattern in enumerate([pattern_nh2, pattern_no2]):
+                        if pattern_found:
                             continue
+                        GM = isomorphism.GraphMatcher(
+                            G1,
+                            pattern,
+                            node_match=isomorphism.categorical_node_match(['atom_type'], [0])
+                        )
+                        if GM.subgraph_is_isomorphic():
+                            pattern_found = True
+                            # Append 0 if NH2 is found and break
+                            # Append 1 if NO2 is found and break
+                            le_classes.append(i)
+                    if not pattern_found:
+                        # Append 2 if neither is found
+                        le_classes.append(2)
+                    # temprary remove class 0 since there is just 1 example
+                    if le_classes[-1] == 0:
+                        # If the connected component contains NH2, ignore it.
+                        # * GRAPHS WITH NH2 ARE DROPPED.
+                        #? Why would I do this? This connects with line 41: mutag_classes_names.
+                        # I think its probably done for cluster purity.
+                        # Probably, graph containing NO2 will also have NH2.
+                        del le_classes[-1]
+                        continue
+                    """
+                    
 
-                        G1 = G.subgraph(cc)
-                        if len(G1.nodes()) >= len(G.nodes()) - 3:
-                            # ad-hoc decision.
-                            continue
-
-                        nodes_to_keep = list(G1.nodes())
-                        # to_keep = embedding[nodes_to_keep]
-                        to_keep = features[nodes_to_keep]
-                        for n in nodes_to_keep:
-                            G1.nodes[n]["atom_type"] = features[n].argmax(-1)
-
-                        #! Woaw, what is this !?
-                        pattern_found = False
-                        for i, pattern in enumerate([pattern_nh2, pattern_no2]):
-                            if pattern_found:
-                                continue
-                            GM = isomorphism.GraphMatcher(
-                                G1,
-                                pattern,
-                                node_match=isomorphism.categorical_node_match(['atom_type'], [0])
-                            )
-                            #! WTH?
-                            if GM.subgraph_is_isomorphic():
-                                pattern_found = True
-                                # Append 0 if NH2 is found, 1 if NO2 is found.
-                                le_classes.append(i)
-                        if not pattern_found:
-                            le_classes.append(2)
-                        # temprary remove class 0 since there is just 1 example
-                        #! This essentially says: Discard the cc if it is NH2.
-                        #! Why would I do that?
-                        if le_classes[-1] == 0:
-                            del le_classes[-1]
-                            continue
-
-                        added += 1
-                        adjs.append(nx.to_numpy_array(G1))
-                        edge_weights.append(nx.get_edge_attributes(G1, "weight"))
-                        # `belonging` notes which graph the connected component belongs to.
-                        belonging.append(num_iter)
-                        nodes_kept.append(nodes_to_keep)
-                        ori_idxs.append(graph_id)
-                        precomputed_embeddings.append(to_keep)
+                    added += 1
+                    adjs.append(nx.to_numpy_array(G1))
+                    edge_weights.append(nx.get_edge_attributes(G1, "weight"))
+                    # `belonging` notes which graph the connected component belongs to.
+                    belonging.append(num_iter)
+                    nodes_kept.append(nodes_to_keep)
+                    ori_idxs.append(graph_id)
+                    precomputed_embeddings.append(to_keep)
 
                 if added:
-                    g = nx.from_numpy_array(adj)
-                    num_iter += 1
+                    g = nx.from_numpy_array(adj) # build a graph from its connected components
+                    num_iter += 1 # counts how many graphs qualified the preprocessing.
                     ori_adjs.append(adj)
                     ori_embeddings.append(features)
                     ori_edge_weights.append(nx.get_edge_attributes(g, "weight"))
                     ori_classes.append(gnn_pred)
-                else:
-                    pass
-                cont_num_iter += 1
+
+                cont_num_iter += 1 # counts how many graphs have been processed.
     belonging = utils.normalize_belonging(belonging)
-    #! Why?
+    #? Why?
+    # 0 would have corresponded to NH2. However, the authors ignore graphs containing NH2.
+    # Now, NO2's 1 becomes 0 and not-found's 2 becomes 1.
     le_classes = [l-1 for l in le_classes]
+
     return (
         adjs,
         edge_weights,
@@ -368,7 +421,14 @@ def convert_labels_to_names(attrs):
     return ret
 
 
-def read_hin(explainer="PGExplainer", model="GCN", split="TRAIN", min_num_include=2, manual_cut=None, priori_annotation=True):
+def read_hin(
+    explainer="PGExplainer",
+    model="GCN",
+    split="TRAIN",
+    min_num_include=2,
+    manual_cut=None,
+    priori_annotation=True
+):
     """read local explanations and cut them based on a certain policy"""
     base_path = base + f"{explainer}/HIN/{model}/"  # ETN_no_split_t1t2_val_643
     adjs, edge_weights, index_stopped = [], [], []

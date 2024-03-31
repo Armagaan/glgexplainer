@@ -16,3 +16,7 @@ code/.ipynb_checkpoints/*
 datasets/logic*
 tmp_steve/*
 code/__pycache__/*
+
+our_data/
+log/
+.vscode/

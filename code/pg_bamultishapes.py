@@ -2,8 +2,8 @@
 import os
 import pickle
 import shutil
+from argparse import ArgumentParser
 
-import numpy as np
 import torch
 import torch_geometric as pyg
 from torch_geometric.explain import Explainer, ModelConfig, PGExplainer
@@ -11,23 +11,28 @@ from tqdm import tqdm
 
 from gnns import GIN_BAMultiShapesDataset
 
-SEED = 7
-pyg.seed_everything(SEED)
+parser = ArgumentParser()
+parser.add_argument("-s", "--seed", type=int, default=45)
+parser.add_argument("-t", "--trained", action="store_true")
+args = parser.parse_args()
+print(args)
 
 
 # * ----- Data & Model
 DATASET = "BAMultiShapes"
 dataset = pyg.datasets.BAMultiShapesDataset(root=f"../our_data/{DATASET}")
 
-path = f"../our_data/{DATASET}/"
-with open(f"{path}/train_indices.pkl", "rb") as reader:
+PATH = f"../our_data/{DATASET}/"
+with open(f"{PATH}/train_indices.pkl", "rb") as reader:
     train_indices = pickle.load(reader)
-with open(f"{path}/test_indices.pkl", "rb") as reader:
+with open(f"{PATH}/val_indices.pkl", "rb") as reader:
+    val_indices = pickle.load(reader)
+with open(f"{PATH}/test_indices.pkl", "rb") as reader:
     test_indices = pickle.load(reader)
-val_indices = test_indices.copy()
 
 train_loader = pyg.loader.DataLoader(dataset[train_indices], batch_size=64, shuffle=False)
-test_loader = pyg.loader.DataLoader(dataset[test_indices], batch_size=64, shuffle=False)
+val_loader   = pyg.loader.DataLoader(dataset[val_indices],   batch_size=64, shuffle=False)
+test_loader  = pyg.loader.DataLoader(dataset[test_indices],  batch_size=64, shuffle=False)
 
 model = GIN_BAMultiShapesDataset()
 model.load_state_dict(torch.load(f"../our_data/{DATASET}/model.pt"))
@@ -59,12 +64,12 @@ def predict(loader):
     return predictions
 
 train_pred_proba = predict_proba(train_loader)
-test_pred_proba = predict_proba(test_loader)
-val_pred_proba = test_pred_proba.clone()
+val_pred_proba   = predict_proba(val_loader)
+test_pred_proba  = predict_proba(test_loader)
 
 train_pred = train_pred_proba.argmax(dim=1).tolist()
-test_pred = test_pred_proba.argmax(dim=1).tolist()
-val_pred = val_pred_proba.argmax(dim=1).tolist()
+val_pred   =   val_pred_proba.argmax(dim=1).tolist()
+test_pred  =  test_pred_proba.argmax(dim=1).tolist()
 
 
 # * ----- PGExplainer
@@ -75,28 +80,33 @@ The coefficient of size regularization is set to 0.05 and entropy regularization
 is set to 30 for all datasets. In this task, we find that relatively high temperatures work well in
 practice. τ0 is set to 5.0 and τT is set to 2.0.
 
+epochs = 30
+lr = 3e-3
+t0, te = 5.0, 2.0
+coff_size = 0.05
+coff_ent = 1.0
+
 >>> Values from PGExplainer repository
-epochs 30
-lr 0.01
-coff_t0 5.0
-coff_te 1.0
-coff_size 0.01
-coff_ent 0.01
+epochs = 30
+lr = 0.01
+t0, te = 5.0, 1.0
+coff_size = 0.01
+coff_ent = 0.01
 
 >>> Values for BAMultishpaes from GLGExplainer A.2.2
 epochs = 5
 elr = 0.007
-coff_t0 = 1.0
+t0 = 1.0
 coff_size = 0.0005
 coff_ent = 0
 """
 
 coeffs = {
-        'epochs': 5,
-        'lr': 0.007,
-        'edge_size': 0.0005, # coefficient of size reg
-        'edge_ent': 0.0, # coefficient of entropy reg
-        'temp': [1.0, 1.0], # temp_0, temp_T
+        'epochs': 30,
+        'lr': 3e-3,
+        'temp': [5.0, 2.0], # temp_0, temp_T
+        'edge_size': 0.05, # coefficient of size reg
+        'edge_ent': 1.0, # coefficient of entropy reg
     }
 explainer = Explainer(
     model=model,
@@ -108,21 +118,20 @@ explainer = Explainer(
     model_config=ModelConfig(
         mode="multiclass_classification",
         task_level="graph",
-        return_type="probs",
+        return_type="raw",
     ),
     node_mask_type=None,
     edge_mask_type="object",
-    threshold_config=None
+    threshold_config=None,
 )
 
 
 # * ----- Train PGExplainer
-TRAINED = False
-path_dir = f'../our_data/local_explanations/PGExplainer/{DATASET}/GCN/'
+PATH_DIR = f'../our_data/local_explanations/PGExplainer/{DATASET}/GCN/'
 
-if TRAINED == True:
+if args.trained:
     print("Loading trained explainer")
-    explainer = torch.load(f"{path_dir}/explainer.pt")
+    explainer = torch.load(f"{PATH_DIR}/explainer.pt")
 else:
     model.eval()
     # Train in batches
@@ -140,60 +149,19 @@ else:
                 ).argmax(dim=1),
                 batch=data.batch,
             )
-    torch.save(explainer, f"{path_dir}/explainer.pt")
-
-
-# * ----- Evaluate the explainer
-fid_plus_list = []
-fid_minus_list = []
-
-model.eval()
-for data in train_loader:
-    explanation = explainer(
-        x=data.x,
-        edge_index=data.edge_index,
-        target=model(
-            x=data.x,
-            edge_index=data.edge_index,
-            batch=data.batch
-        ).argmax(dim=1),
-        batch=data.batch,
-    )
-    fid_plus, fid_minus = pyg.explain.metric.fidelity(
-        explainer=explainer,
-        explanation=explanation
-    )
-    fid_plus_list.append(fid_plus)
-    fid_minus_list.append(fid_minus)
-
-fid_plus_arr = np.array(fid_plus_list)
-fid_minus_arr = np.array(fid_minus_list)
-
-print(">>> Fidelity")
-print(
-    f"Plus | min:{fid_plus_arr.min()}"
-    f" | mean: {fid_plus_arr.mean()}"
-    f" | std: {fid_plus_arr.std()}"
-    f" | max: {fid_plus_arr.max()}"
-)
-print(
-    f"Minus | min:{fid_minus_arr.min()}"
-    f" | mean: {fid_minus_arr.mean()}"
-    f" | std: {fid_minus_arr.std()}"
-    f" | max: {fid_minus_arr.max()}"
-)
+    torch.save(explainer, f"{PATH_DIR}/explainer.pt")
 
 
 # * ----- Write the explanations to disk
 for key in ["TRAIN", "TEST", "VAL"]:
-    shutil.rmtree(f"{path_dir}/{key}")
-    os.makedirs(f"{path_dir}/{key}/0")
-    os.makedirs(f"{path_dir}/{key}/1")
-    os.makedirs(f"{path_dir}/{key}/features")
+    shutil.rmtree(f"{PATH_DIR}/{key}", ignore_errors=True)
+    os.makedirs(f"{PATH_DIR}/{key}/0")
+    os.makedirs(f"{PATH_DIR}/{key}/1")
+    os.makedirs(f"{PATH_DIR}/{key}/features")
 
 
 for split in ["train", "val", "test"]:
-    path_dir_split = f'{path_dir}/{split.upper()}/'
+    path_dir_split = f'{PATH_DIR}/{split.upper()}/'
     for i, index in enumerate(tqdm(
         eval(f"{split}_indices"), colour="blue", desc=f"Explaining {split} graphs"
     )):

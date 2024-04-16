@@ -322,21 +322,27 @@ class GLGExplainer(torch.nn.Module):
                 print("Concept distribution: ", np.unique(concept_predictions, return_counts=True))        
                 print("Logic formulas:")
                 print("For class 0:")
-                print(accuracy0, utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
+                print(accuracy0)
+                print("Formula:", explanation0)
+                print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
 
             explanation1, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=1, max_accuracy=True, topk_explanations=3000, try_all=False)
             accuracy1, preds = test_explanation(explanation1, x_train, y_train_1h, target_class=1, mask=torch.arange(x_train.shape[0]).long(), material=False)
             
             if plot:
                 print("For class 1:")
-                print(accuracy1, utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
+                print(accuracy1)
+                print("Formula:", explanation1)
+                print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
 
             if self.num_classes == 3:
                 explanation2, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=2, max_accuracy=True, topk_explanations=3000, try_all=False)
                 accuracy2, preds = test_explanation(explanation2, x_train, y_train_1h, target_class=2, mask=torch.arange(x_train.shape[0]).long(), material=False)
                 if plot:
                     print("For class 2:")
-                    print(accuracy2, utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
+                    print(accuracy2)
+                    print("Formula:", explanation2)
+                    print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
                 accuracy, preds = test_explanations([explanation0, explanation1, explanation2], x_train, y_train_1h, mask=torch.arange(x_train.shape[0]).long(), material=False)
                 logic_acc = hmean([accuracy0, accuracy1, accuracy2])
             else:

@@ -1,36 +1,44 @@
-
 import json
 import os
+from argparse import ArgumentParser
+from pickle import dump
 
 import matplotlib.pyplot as plt
 import torch
 import torch_geometric.transforms as T
+from torch_geometric.utils import to_networkx
+from torch_geometric.loader import DataLoader
 
 import utils
 import models
 from local_explanations import *
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-TRAINED = True # Is GLG trained?
+parser = ArgumentParser()
+parser.add_argument("-t", "--trained", action="store_true",
+                    help="Pass the flag if GLG has already been trained.")
+parser.add_argument("-d", "--device", type=str, default="cpu", choices=["cpu", "0", "1", "2", "3"])
+parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"], required=True)
+args = parser.parse_args()
+print(args)
+
+if args.device != "cpu":
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
 # * Read hyper-parameters and data
 DATASET_NAME = "Mutagenicity"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-user = "us"
-if user == "author":
-    SAVE_GLG_MODEL_PATH = "../trained_models/mutagenicity_with_nh2.pt"
-    SAVE_GLG_PLOT_PATH = "../plots/mutagenicity_with_nh2.png"
-    manual_cut = hyper_params["manual_cut"]
-else:
-    SAVE_GLG_MODEL_PATH = "../our_data/trained_models/mutagenicity_with_nh2.pt"
-    SAVE_GLG_PLOT_PATH = "../our_data/plots/mutagenicity_with_nh2.png"
-    manual_cut = None # Armgaan: Our explanations have smaller values than the authors'
-
+PATH_GLG_MODEL = f"../our_data/trained_glg_models/{DATASET_NAME}_{args.explainer}.pt"
+PATH_GLG_PLOT = f"../our_data/plots/{DATASET_NAME}_{args.explainer}.png"
+PATH_CONCEPTS = f"../our_data/concepts/{DATASET_NAME}_{args.explainer}.pkl"
+manual_cut = None # Armgaan: Our explanations may differ from the authors'
+hyper_params["manual_cut"] = manual_cut
 
 from local_explanations import read_mutagenicity
 
+
+# * ----- Data
 adjs_train , \
 edge_weights_train , \
 ori_adjs_train , \
@@ -38,7 +46,8 @@ ori_classes_train , \
 belonging_train , \
 summary_predictions_train , \
 le_classes_train ,\
-embeddings_train = read_mutagenicity(evaluate_method=False, 
+embeddings_train = read_mutagenicity(explainer=args.explainer,
+                                     evaluate_method=False, 
                                      manual_cut=manual_cut,
                                      split="TRAIN")
 
@@ -49,7 +58,8 @@ ori_classes_val , \
 belonging_val , \
 summary_predictions_val , \
 le_classes_val ,\
-embeddings_val = read_mutagenicity(evaluate_method=False, 
+embeddings_val = read_mutagenicity(explainer=args.explainer,
+                                   evaluate_method=False, 
                                    manual_cut=manual_cut,
                                    split="VAL")
 
@@ -60,19 +70,18 @@ ori_classes_test , \
 belonging_test , \
 summary_predictions_test , \
 le_classes_test ,\
-embeddings_test = read_mutagenicity(evaluate_method=False, 
+embeddings_test = read_mutagenicity(explainer=args.explainer,
+                                    evaluate_method=False, 
                                     manual_cut=manual_cut,
                                     split="TEST")
 
-device = "cpu" # torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if args.device != 'cpu' else 'cpu')
 transform = None
 
-#  ERROR : adjs_train is empty. 
 dataset_train = utils.LocalExplanationsDataset("", adjs_train, "embeddings", transform=transform, y=le_classes_train, belonging=belonging_train, task_y=ori_classes_train, precomputed_embeddings=embeddings_train)
 dataset_val   = utils.LocalExplanationsDataset("", adjs_val,   "embeddings", transform=transform, y=le_classes_val,   belonging=belonging_val,   task_y=ori_classes_val,   precomputed_embeddings=embeddings_val)
 dataset_test  = utils.LocalExplanationsDataset("", adjs_test,  "embeddings", transform=transform, y=le_classes_test,  belonging=belonging_test,  task_y=ori_classes_test,  precomputed_embeddings=embeddings_test)
 
-# print(dataset_train[0])
 """
 # y: le_class created through isomorphism tests.
 # task_y: gnn prediction
@@ -80,7 +89,8 @@ dataset_test  = utils.LocalExplanationsDataset("", adjs_test,  "embeddings", tra
 # graph_id: Graph id of the graph to which the connected component belongs.
 """
 
-# * Train GLGExplainer
+
+# * ----- Train GLGExplainer
 train_group_loader = utils.build_dataloader(dataset_train, belonging_train, num_input_graphs=128)
 val_group_loader   = utils.build_dataloader(dataset_val,   belonging_val,   num_input_graphs=256)
 test_group_loader  = utils.build_dataloader(dataset_test,  belonging_test,  num_input_graphs=256)
@@ -112,12 +122,12 @@ expl = models.GLGExplainer(
 ).to(device)
 
 
-if not TRAINED:
+if not args.trained:
     print("\n>>> Training GLGExplainer")
     expl.iterate(train_group_loader, val_group_loader, plot=False)
-    torch.save(expl.state_dict(), SAVE_GLG_MODEL_PATH)
+    torch.save(expl.state_dict(), PATH_GLG_MODEL)
 else:
-    expl.load_state_dict(torch.load(SAVE_GLG_MODEL_PATH))
+    expl.load_state_dict(torch.load(PATH_GLG_MODEL))
 
 expl.eval()
 
@@ -128,47 +138,84 @@ print("\n>>> Inspect test set")
 expl.inspect(test_group_loader, plot=True)
 
 
-# * Materialize Prototypes
+# * ----- Materialize Prototypes
 print("\n>>> Visualization")
+
 # change assign function to a non-discrete one just to compute distance between local expls. and prototypes
 # useful to show the materialization of prototypes based on distance 
-expl = expl
-expl.hyper["assign_func"] = "sim"
+# expl.hyper["assign_func"] = "sim"
 
-(
-    x_train,
-    emb,
-    concepts_assignement,
-    y_train_1h,
-    le_classes,
-    le_idxs,
-    belonging
-) = expl.get_concept_vector(train_group_loader, return_raw=True)
+loader = DataLoader(dataset_train, batch_size=64, shuffle=False)
+# Iterate over graphs in dataset_train
+le_embeddings = torch.tensor([], device=device)
+le_idxs = torch.tensor([], device=device)
+for data in loader:
+    data = data.to(device)
+    # Pass them through the le_model to get their embedding
+    embs = expl.le_model(x=data.x, edge_index=data.edge_index, batch=data.batch)
+    le_embeddings = torch.concat([le_embeddings, embs], dim=0)
+    le_idxs = torch.concat([le_idxs, data.le_id], dim=0)
 
-expl.hyper["assign_func"] = "discrete"
+# Calculate and store the distance to expl.prototypes
+concepts_assignment = utils.prototype_assignement(
+    assign_func=hyper_params["assign_func"],
+    le_embeddings=le_embeddings,
+    prototype_vectors=expl.prototype_vectors,
+    temp=1
+)
 
 proto_names = {
     0: "Others",
-    1: "NO2",
+    1: "NH2, NO2",
 }
 
 torch.manual_seed(42)
-
 fig = plt.figure(figsize=(17,4))
 n = 0
 for p in range(expl.hyper["num_prototypes"]):
-    idxs = le_idxs[concepts_assignement.argmax(-1) == p]
-    idxs = idxs[torch.randperm(len(idxs))] # for random examples
-    sa = concepts_assignement[concepts_assignement.argmax(-1) == p]
+    idxs = le_idxs[concepts_assignment.argmax(-1) == p]
+    # idxs = idxs[torch.randperm(len(idxs))] # for random examples
+    sa = concepts_assignment[concepts_assignment.argmax(-1) == p]
     idxs = idxs[torch.argsort(sa[:, p], descending=True)]
 
     for ex in range(5):
         n += 1
-        plt.subplot(expl.hyper["num_prototypes"],5,n)        
+        plt.subplot(expl.hyper["num_prototypes"],5,n)
         utils.plot_molecule(dataset_train[int(idxs[ex])], composite_plot=True)
 
 for p in range(expl.hyper["num_prototypes"]):
     plt.subplot(expl.hyper["num_prototypes"],5,5*p + 1)
     plt.ylabel(f"$P_{p}$\n {proto_names[p]}", size=25, rotation="horizontal", labelpad=50)
+plt.savefig(PATH_GLG_PLOT)
 
-plt.savefig(SAVE_GLG_PLOT_PATH)
+
+# * ----- For calculating accuracy, find the closest local explanation to a prototype as its replacement
+def glg_to_nx(subgraph):
+    """Convert pyg objects to networkx graphs"""
+    subgraph.x = subgraph.x.argmax(dim=-1)
+    subgraph_nx = to_networkx(
+        data=subgraph,
+        node_attrs=["x"],
+        # The local explanations don't save the edge features.
+        # Here, the edge_attrs are the weights assigned by the explainer to individual edges.
+        edge_attrs=None,
+        to_undirected=True,
+    )    
+    return subgraph_nx
+
+concepts = {}
+# Iterate over the #protypes.
+for p in range(expl.hyper["num_prototypes"]):
+    # Indices of subgraphs belonging to prototype p's cluster.
+    indices_p = le_idxs[concepts_assignment.argmax(-1) == p]
+    # Soft assignments of the local explantions to prototype p.
+    sa = concepts_assignment[concepts_assignment.argmax(-1) == p]
+    # Get the index of the local explanation closest to prototype p.
+    idx = int(indices_p[torch.argsort(sa[:, p], descending=True)][0])
+    # Get the subgraph.
+    subgraph = dataset_train[idx]
+    # Store it as a nx graph in a dictionary
+    concepts[p] = glg_to_nx(subgraph)
+
+with open(PATH_CONCEPTS, "wb") as file:
+    dump(concepts, file)

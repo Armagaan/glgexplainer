@@ -12,7 +12,7 @@ import torch
 import torch_geometric.transforms as T
 from torch_geometric.utils import to_networkx
 
-TRAINED = True # Is GLG trained?
+TRAINED = False # Is GLG trained?
 
 # * Read hyper-parameters and data
 DATASET_NAME = "BAMultiShapes"
@@ -51,7 +51,7 @@ le_classes_test = read_bamultishapes(evaluate_method=False, remove_mix=False, mi
 
 
 # * Dataset
-device = "cpu" # torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 transform = T.Compose([
     T.NormalizeFeatures(),
 ])     

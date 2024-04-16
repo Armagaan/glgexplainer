@@ -1,7 +1,9 @@
 import torch
 import torch_geometric as pyg
 import torch.nn.functional as F
-from torch_geometric.nn import GATConv, GINConv
+from torch_geometric.nn import GATConv
+
+from wrappers.gin import GINConv
 
 class GAT_MUTAG(torch.nn.Module):
     def __init__(self, hidden_dim = 20, dropout = 0):
@@ -69,16 +71,16 @@ class GAT_Mutagenicity(torch.nn.Module):
             x = self.convs[i](x, edge_index, edge_attr=edge_attr)
             x = self.bns[i](x)
             x = F.relu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)  # Dropout after every layer.
+            x = F.dropout(x, p=self.dropout, training=self.training)
         node_embs = x
         graph_emb = pyg.nn.pool.global_add_pool(node_embs, batch)
         out = self.fc(graph_emb)
-        out = torch.nn.functional.softmax(out, dim=1) # * Added as PG expects probabilities
+
         return out
 
 
 class GIN_BAMultiShapesDataset(torch.nn.Module):
-    def __init__(self, hidden_dim = 20, dropout = 0):
+    def __init__(self, hidden_dim=20, dropout=0):
         torch.manual_seed(7)
         super().__init__()
         num_node_features = 10 
@@ -88,29 +90,26 @@ class GIN_BAMultiShapesDataset(torch.nn.Module):
         self.bns = torch.nn.ModuleList()
         self.num_layers = 3
 
-        self.convs.append(GINConv(torch.nn.Sequential(
-            torch.nn.Linear(num_node_features, hidden_dim),
-            torch.nn.BatchNorm1d(hidden_dim),
-        )))
+        self.convs.append(GINConv(num_node_features, hidden_dim))
+        self.bns.append(torch.nn.BatchNorm1d(hidden_dim))
 
-        # Follow-up GCN layers.
         for __ in range(self.num_layers - 1):
-            self.convs.append(GINConv(torch.nn.Sequential(
-                torch.nn.Linear(hidden_dim, hidden_dim),
-                torch.nn.BatchNorm1d(hidden_dim),
-            )))
+            self.convs.append(GINConv(hidden_dim, hidden_dim))
+            self.bns.append(torch.nn.BatchNorm1d(hidden_dim))
+        
         self.fc = torch.nn.Linear(hidden_dim, num_classes)
 
-    def forward(self, x, edge_index, batch): 
+    def forward(self, x, edge_index, batch, edge_weight=None): 
         for i in range(self.num_layers):
-            x = self.convs[i](x, edge_index)
+            x = self.convs[i](x, edge_index, edge_weight)
+            x = self.bns[i](x)
             x = F.relu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = F.dropout(x, p=self.dropout, training=self.training)  # Dropout after every layer.
 
         node_embs = x
         graph_emb = pyg.nn.pool.global_add_pool(node_embs, batch)
         out = self.fc(graph_emb)
-        out = torch.nn.functional.softmax(out, dim=1) # * Added as PG expects probabilities
+
         return out
 
 

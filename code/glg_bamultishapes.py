@@ -1,5 +1,5 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+from argparse import ArgumentParser
+from pickle import dump
 
 from local_explanations import *
 import utils
@@ -12,21 +12,22 @@ import torch
 import torch_geometric.transforms as T
 from torch_geometric.utils import to_networkx
 
-TRAINED = False # Is GLG trained?
+parser = ArgumentParser()
+parser.add_argument("-t", "--trained", action="store_true",
+                    help="Pass the flag if GLG has already been trained.")
+parser.add_argument("-d", "--device", type=str, default="cpu", choices=["cpu", "0", "1", "2", "3"])
+parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"], required=True)
+args = parser.parse_args()
+print(args)
 
 # * Read hyper-parameters and data
 DATASET_NAME = "BAMultiShapes"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-user = "us"
-if user == "author":
-    SAVE_GLG_MODEL_PATH = "../trained_models/bamultishapes.pt"
-    SAVE_GLG_PLOT_PATH = "../plots/bamultishapes.png"
-else:
-    SAVE_GLG_MODEL_PATH = "../our_data/trained_models/bamultishapes.pt"
-    SAVE_GLG_PLOT_PATH = "../our_data/plots/bamultishapes.png"
-
+PATH_GLG_MODEL = f"../our_data/trained_glg_models/{DATASET_NAME}_{args.explainer}.pt"
+PATH_GLG_PLOT = f"../our_data/plots/{DATASET_NAME}_{args.explainer}.png"
+PATH_CONCEPTS = f"../our_data/concepts/{DATASET_NAME}_{args.explainer}.pkl"
 
 adjs_train, \
 edge_weights_train, \
@@ -51,7 +52,7 @@ le_classes_test = read_bamultishapes(evaluate_method=False, remove_mix=False, mi
 
 
 # * Dataset
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device(f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu')
 transform = T.Compose([
     T.NormalizeFeatures(),
 ])     
@@ -87,15 +88,15 @@ expl = models.GLGExplainer(
     hyper_params=hyper_params,
     classes_names=bamultishapes_classes_names,
     dataset_name=DATASET_NAME,
-    num_classes=len(train_group_loader.dataset.data.task_y.unique())
+    num_classes=4#len(train_group_loader.dataset.data.task_y.unique())
 ).to(device)
 
-if not TRAINED:
+if not args.trained:
     print("\n>>> Training GLGExplainer")
     expl.iterate(train_group_loader, val_group_loader, plot=False)
-    torch.save(expl.state_dict(), SAVE_GLG_MODEL_PATH)
+    torch.save(expl.state_dict(), PATH_GLG_MODEL)
 else:
-    expl.load_state_dict(torch.load(SAVE_GLG_MODEL_PATH))
+    expl.load_state_dict(torch.load(PATH_GLG_MODEL))
 
 expl.eval()
 
@@ -107,19 +108,16 @@ expl.inspect(test_group_loader, plot=True)
 
 
 # * Materialize prototypes
-# change assign function to a non-discrete one just to compute distance between local expls. and prototypes
-# useful to show the materialization of prototypes based on distance 
-expl.hyper["assign_func"] = "sim"
+print("\n>>> Visualize")
 (
     x_train,
     emb,
-    concepts_assignement,
+    concepts_assignment,
     y_train_1h,
     le_classes,
     le_idxs,
     belonging
-) = expl.get_concept_vector(test_group_loader, return_raw=True)        
-expl.hyper["assign_func"] = "discrete"
+) = expl.get_concept_vector(test_group_loader, return_raw=True)
 
 proto_names = {
     0: "BA",
@@ -133,9 +131,9 @@ torch.manual_seed(42)
 fig = plt.figure(figsize=(15,5*1.8))
 n = 0
 for p in range(expl.hyper["num_prototypes"]):
-    idxs = le_idxs[concepts_assignement.argmax(-1) == p]
+    idxs = le_idxs[concepts_assignment.argmax(-1) == p]
     #idxs = idxs[torch.randperm(len(idxs))]    # random 
-    sa = concepts_assignement[concepts_assignement.argmax(-1) == p]
+    sa = concepts_assignment[concepts_assignment.argmax(-1) == p]
     idxs = idxs[torch.argsort(sa[:, p], descending=True)]
     for ex in range(min(5, len(idxs))):
         n += 1
@@ -149,6 +147,39 @@ for p in range(expl.hyper["num_prototypes"]):
 for p in range(expl.hyper["num_prototypes"]):
     plt.subplot(expl.hyper["num_prototypes"],5,5*p + 1)
     plt.ylabel(f"$P_{p}$\n {proto_names[p]}", size=25, rotation="horizontal", labelpad=50)
+plt.savefig(PATH_GLG_PLOT)
 
-print(">>> Visualize")
-plt.savefig(SAVE_GLG_PLOT_PATH)
+
+# * ----- For calculating accuracy, find the closest local explanation to a prototype as its replacement
+def glg_to_nx(subgraph):
+    """Convert pyg objects to networkx graphs"""
+    subgraph.x = subgraph.x.argmax(dim=-1)
+    subgraph_nx = to_networkx(
+        data=subgraph,
+        node_attrs=["x"],
+        # The local explanations don't save the edge features.
+        # Here, the edge_attrs are the weights assigned by the explainer to individual edges.
+        edge_attrs=None,
+        to_undirected=True,
+    )    
+    return subgraph_nx
+
+concepts = {}
+# Iterate over the #protypes.
+for p in range(expl.hyper["num_prototypes"]):
+    # Indices of subgraphs belonging to prototype p's cluster.
+    indices_p = le_idxs[concepts_assignment.argmax(-1) == p]
+    # Soft assignments of the local explantions to prototype p.
+    sa = concepts_assignment[concepts_assignment.argmax(-1) == p]
+    # Get the index of the local explanation closest to prototype p.
+    try:
+        idx = int(indices_p[torch.argsort(sa[:, p], descending=True)][0])
+        # Get the subgraph.
+        subgraph = dataset_train[idx]
+        # Store it as a nx graph in a dictionary
+        concepts[p] = glg_to_nx(subgraph)
+    except IndexError:
+        concepts[p] = None
+
+with open(PATH_CONCEPTS, "wb") as file:
+    dump(concepts, file)

@@ -18,7 +18,7 @@
     "debug_prototypes": false,
     "num_prototypes": 2,
     "dim_prototypes": 10,
-    "num_le_features": 14,
+    "num_le_features": 7,
     "embedder_backbone": "GIN",
     "embedder_num_layers": 2,
     "activation": "leaky",
@@ -28,5 +28,5 @@
     "log_images": false,
     "log_models": false,
     "log_wandb": false,
-    "num_epochs": 500
+    "num_epochs": 2000
 }

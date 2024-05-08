@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 from copy import deepcopy
 from random import seed as rseed
 from os import environ
@@ -5,29 +6,29 @@ import pickle
 import torch
 import torch_geometric as pyg
 
-from gnns import GAT_Mutagenicity
+import gnns
 
-SEED = 7
+parser = ArgumentParser()
+parser.add_argument("-d", "--dataset", type=str,
+                    choices=["MUTAG", "Mutagenicity", "NCI1"], required=True)
+parser.add_argument("-s", "--seed", type=int, default=45)
+args = parser.parse_args()
+
 DEVICE = "cuda:3"
-torch.manual_seed(SEED)
-torch.cuda.manual_seed(SEED)
-pyg.seed_everything(SEED)
-
-def set_seed(seed: int = 42) -> None:
-    rseed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    # # When running on the CuDNN backend, two further options must be set
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
-    # Set a fixed value for the hash seed
-    environ["PYTHONHASHSEED"] = str(seed)
-
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed(args.seed)
+pyg.seed_everything(args.seed)
+rseed(args.seed)
+# # When running on the CuDNN backend, two further options must be set
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+# Set a fixed value for the hash seed
+environ["PYTHONHASHSEED"] = str(args.seed)
 
 TRAINED = False
-PATH = f"../our_data/Mutagenicity"
+PATH = f"../our_data/{args.dataset}"
 
-dataset = pyg.datasets.TUDataset(name="Mutagenicity", root="../our_data/")
+dataset = pyg.datasets.TUDataset(name=args.dataset, root="../our_data/")
 
 with open(f"{PATH}/train_indices.pkl", "rb") as file:
     train_indices = pickle.load(file)
@@ -40,7 +41,10 @@ train_loader = pyg.loader.DataLoader(dataset[train_indices], batch_size=128, shu
 val_loader   = pyg.loader.DataLoader(dataset[val_indices]  , batch_size=128, shuffle=False)
 test_loader  = pyg.loader.DataLoader(dataset[test_indices] , batch_size=128, shuffle=False)
 
-model = GAT_Mutagenicity()
+if args.dataset == "Mutagenicity":
+    model = gnns.GAT_Mutagenicity()
+elif args.dataset == "NCI1":
+    model = gnns.GIN_NCI1()
 model = model.to(DEVICE)
 
 opt = torch.optim.Adam(params=model.parameters(), lr=1e-2)

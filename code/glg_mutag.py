@@ -1,7 +1,7 @@
 import json
 import os
 from argparse import ArgumentParser
-from pickle import dump, load
+from pickle import dump
 
 import matplotlib.pyplot as plt
 import torch
@@ -21,19 +21,17 @@ parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGE
 args = parser.parse_args()
 print(args)
 
+
 # * Read hyper-parameters and data
-DATASET_NAME = "Mutagenicity"
+DATASET_NAME = "MUTAG"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
 PATH_GLG_MODEL = f"../our_data/trained_glg_models/{DATASET_NAME}_{args.explainer}.pt"
 PATH_GLG_PLOT = f"../our_data/plots/{DATASET_NAME}_{args.explainer}.png"
 PATH_CONCEPTS = f"../our_data/concepts/{DATASET_NAME}_{args.explainer}.pkl"
-PATH_FORMULAE = f"../our_data/formulae/{DATASET_NAME}_{args.explainer}.pkl"
-manual_cut = None # Armgaan: Our explanations may differ from the authors'
-hyper_params["manual_cut"] = manual_cut
 
-from local_explanations import read_mutagenicity
+from local_explanations import read_mutag
 
 
 # * ----- Data
@@ -44,9 +42,8 @@ ori_classes_train , \
 belonging_train , \
 summary_predictions_train , \
 le_classes_train ,\
-embeddings_train = read_mutagenicity(explainer=args.explainer,
+embeddings_train = read_mutag(explainer=args.explainer,
                                      evaluate_method=False, 
-                                     manual_cut=manual_cut,
                                      split="TRAIN")
 
 adjs_val , \
@@ -56,9 +53,8 @@ ori_classes_val , \
 belonging_val , \
 summary_predictions_val , \
 le_classes_val ,\
-embeddings_val = read_mutagenicity(explainer=args.explainer,
+embeddings_val = read_mutag(explainer=args.explainer,
                                    evaluate_method=False, 
-                                   manual_cut=manual_cut,
                                    split="VAL")
 
 adjs_test , \
@@ -68,9 +64,8 @@ ori_classes_test , \
 belonging_test , \
 summary_predictions_test , \
 le_classes_test ,\
-embeddings_test = read_mutagenicity(explainer=args.explainer,
+embeddings_test = read_mutag(explainer=args.explainer,
                                     evaluate_method=False, 
-                                    manual_cut=manual_cut,
                                     split="TEST")
 
 device = torch.device(f'cuda:{args.device}' if args.device != 'cpu' else 'cpu')
@@ -124,22 +119,16 @@ if not args.trained:
     print("\n>>> Training GLGExplainer")
     expl.iterate(train_group_loader, val_group_loader, plot=False)
     torch.save(expl.state_dict(), PATH_GLG_MODEL)
-    with open(PATH_FORMULAE, "wb") as file:
-        dump(dict(explanations=expl.explanations, explanations_raw=expl.explanations_raw), file)
 else:
     expl.load_state_dict(torch.load(PATH_GLG_MODEL))
-    with open(PATH_FORMULAE, "rb") as file:
-        exps_dict = load(file)
-        expl.explanations = exps_dict["explanations"]
-        expl.explanations_raw = exps_dict["explanations_raw"]
 
 expl.eval()
 
 print("\n>>> Inspect train set")
-expl.inspect(train_group_loader, testing_formulae=True)
+expl.inspect(train_group_loader, plot=True)
 
 print("\n>>> Inspect test set")
-expl.inspect(test_group_loader, testing_formulae=True)
+expl.inspect(test_group_loader, plot=True)
 
 
 # * ----- Materialize Prototypes

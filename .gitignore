@@ -20,3 +20,4 @@ code/__pycache__/*
 our_data/
 log/
 .vscode/
+__pycache__/

@@ -44,6 +44,9 @@ class GLGExplainer(torch.nn.Module):
         self.optimizer = torch.optim.Adam(le_model.parameters(), lr=self.hyper["le_emb_lr"])
         self.optimizer.add_param_group({'params': len_model.parameters(), 'lr': self.hyper["len_lr"]})
         self.optimizer.add_param_group({'params': self.prototype_vectors, 'lr': self.hyper["proto_lr"]})
+
+        self.explanations = [None, None, None]
+        self.explanations_raw = [None, None, None]
         
         if hyper_params["focal_loss"]:
             self.loss_len = utils.focal_loss
@@ -252,7 +255,7 @@ class GLGExplainer(torch.nn.Module):
         return
 
     
-    def inspect(self, loader, log_wandb=False, plot=True, is_train_set=False):
+    def inspect(self, loader, log_wandb=False, plot=True, is_train_set=False, testing_formulae=False):
         self.eval()
         
         with torch.no_grad():
@@ -313,11 +316,18 @@ class GLGExplainer(torch.nn.Module):
             self.len_model.to("cpu")
             x_train = x_train.detach().cpu()
             y_train_1h = y_train_1h.cpu()
-            explanation0, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=0, max_accuracy=True, topk_explanations=3000, try_all=False)
+            if testing_formulae:
+                explanation0 = self.explanations[0]
+                explanation_raw = self.explanations_raw[0]
+            else:
+                explanation0, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=0, max_accuracy=True, topk_explanations=3000, try_all=False)
+                self.explanations[0] = explanation0
+                self.explanations_raw[0] = explanation_raw
+
             accuracy0, preds = test_explanation(explanation0, x_train, y_train_1h, target_class=0, mask=torch.arange(x_train.shape[0]).long(), material=False)
             
             cluster_accs = utils.get_cluster_accuracy(concept_predictions, le_classes)
-            if plot:
+            if testing_formulae:
                 print(f"Concept Purity: {np.mean(cluster_accs):2f} +- {np.std(cluster_accs):2f}")
                 print("Concept distribution: ", np.unique(concept_predictions, return_counts=True))        
                 print("Logic formulas:")
@@ -326,19 +336,32 @@ class GLGExplainer(torch.nn.Module):
                 print("Formula:", explanation0)
                 print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
 
-            explanation1, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=1, max_accuracy=True, topk_explanations=3000, try_all=False)
+            if testing_formulae:
+                explanation1 = self.explanations[1]
+                explanation_raw = self.explanations_raw[1]
+            else:
+                explanation1, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=1, max_accuracy=True, topk_explanations=3000, try_all=False)
+                self.explanations[1] = explanation1
+                self.explanations_raw[1] = explanation_raw
             accuracy1, preds = test_explanation(explanation1, x_train, y_train_1h, target_class=1, mask=torch.arange(x_train.shape[0]).long(), material=False)
             
-            if plot:
+            if testing_formulae:
                 print("For class 1:")
                 print(accuracy1)
                 print("Formula:", explanation1)
                 print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
 
             if self.num_classes == 3:
-                explanation2, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=2, max_accuracy=True, topk_explanations=3000, try_all=False)
+                if testing_formulae:
+                    explanation2 = self.explanations[2]
+                    explanation_raw = self.explanations_raw[2]
+                else:
+                    explanation2, explanation_raw = entropy.explain_class(self.len_model, x_train, y_train_1h, train_mask=torch.arange(x_train.shape[0]).long(), val_mask=torch.arange(x_train.shape[0]).long(), target_class=2, max_accuracy=True, topk_explanations=3000, try_all=False)
+                    self.explanations[2] = explanation2
+                    self.explanations_raw[2] = explanation_raw
                 accuracy2, preds = test_explanation(explanation2, x_train, y_train_1h, target_class=2, mask=torch.arange(x_train.shape[0]).long(), material=False)
-                if plot:
+                
+                if testing_formulae:
                     print("For class 2:")
                     print(accuracy2)
                     print("Formula:", explanation2)

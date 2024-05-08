@@ -249,7 +249,7 @@ def read_bamultishapes(
 
 def read_mutagenicity(
         explainer="PGExplainer",
-        model="GCN_TF",
+        model="GCN",
         split="TRAIN",
         evaluate_method=True,
         min_num_include=None,
@@ -391,6 +391,204 @@ def read_mutagenicity(
     #? Why?
     # 0 would have corresponded to NH2. However, the authors ignore graphs containing NH2.
     # Now, NO2's 1 becomes 0 and not-found's 2 becomes 1.
+    le_classes = [l-1 for l in le_classes]
+
+    return (
+        adjs,
+        edge_weights,
+        ori_adjs,
+        ori_classes,
+        belonging,
+        summary_predictions,
+        le_classes,
+        precomputed_embeddings
+    )
+
+
+def read_mutag(
+        explainer="PGExplainer",
+        model="GCN",
+        split="TRAIN",
+        evaluate_method=True,
+        min_num_include=None,
+        manual_cut=None
+):
+    """read local explanations and cut them based on a certain policy"""
+    base_path = base + f"{explainer}/MUTAG/{model}/"
+    adjs, edge_weights, index_stopped = [], [], []
+    ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
+    precomputed_embeddings, ori_embeddings = [], []
+    le_classes = []
+    ori_idxs, nodes_kept = [], []
+    summary_predictions = defaultdict(list)
+
+    cont_num_iter, num_iter = 0, 0
+    for split in [split]:
+        path = base_path + split + "/"
+        for c in ["0", "1"]:
+            for pp in os.listdir(path + c + "/"):
+                # Read the explanation graph.
+                graph_id = int(pp.split("_")[1].split(".")[0])
+                gnn_pred = int(pp.split("_")[0])
+                summary_predictions["correct"].append(int(c))
+                # Note: adj is real valued. These rael values will become edge weights later on.
+                adj = np.load(path + c + "/" + pp, allow_pickle=True)
+                features = np.load(path + "features" + "/" + pp, allow_pickle=True)
+
+                if manual_cut is None:
+                    cut = elbow_method(np.triu(adj).flatten(), index_stopped, min_num_include=2)
+                else:
+                    cut = manual_cut
+
+                masked = copy.deepcopy(adj)
+                masked[masked < cut] = 0
+                masked[masked >= cut] = 1
+                # Default argument: edge_attr="weight"
+                # This edge_attr separates the adjacency and the edge weights.
+                G = nx.from_numpy_array(masked)
+
+                connected_components = list(nx.connected_components(G))
+                # only single nodes as connected component. No edges in the graph
+                if len(connected_components) == adj.shape[0]:
+                    # The local explainer couldn't find an explanation.
+                    # The explanatin grpah doesn't contain any edges.
+                    continue
+
+                added = 0
+                for cc in connected_components:
+                    # exclude cc containing a single node
+                    if len(cc) < 2:
+                        continue
+
+                    G1 = G.subgraph(cc)
+                    nodes_to_keep = list(G1.nodes())
+                    # to_keep = embedding[nodes_to_keep]
+                    to_keep = features[nodes_to_keep]
+                    for n in nodes_to_keep:
+                        G1.nodes[n]["atom_type"] = features[n].argmax(-1)
+                    
+                    # Let everyone be the same le_class
+                    le_classes.append(1)
+
+                    added += 1
+                    adjs.append(nx.to_numpy_array(G1))
+                    edge_weights.append(nx.get_edge_attributes(G1, "weight"))
+                    # `belonging` notes which graph the connected component belongs to.
+                    belonging.append(num_iter)
+                    nodes_kept.append(nodes_to_keep)
+                    ori_idxs.append(graph_id)
+                    precomputed_embeddings.append(to_keep)
+
+                if added:
+                    g = nx.from_numpy_array(adj) # build a graph from its connected components
+                    num_iter += 1 # counts how many graphs qualified the preprocessing.
+                    ori_adjs.append(adj)
+                    ori_embeddings.append(features)
+                    ori_edge_weights.append(nx.get_edge_attributes(g, "weight"))
+                    ori_classes.append(gnn_pred)
+
+                cont_num_iter += 1 # counts how many graphs have been processed.
+    belonging = utils.normalize_belonging(belonging)
+    # Now, not-found's 2 becomes 1, rest change from 1 to 0.
+    le_classes = [l-1 for l in le_classes]
+
+    return (
+        adjs,
+        edge_weights,
+        ori_adjs,
+        ori_classes,
+        belonging,
+        summary_predictions,
+        le_classes,
+        precomputed_embeddings
+    )
+
+
+def read_nci1(
+        explainer="PGExplainer",
+        model="GCN",
+        split="TRAIN",
+        evaluate_method=True,
+        min_num_include=None,
+        manual_cut=None
+):
+    """read local explanations and cut them based on a certain policy"""
+    base_path = base + f"{explainer}/NCI1/{model}/"
+    adjs, edge_weights, index_stopped = [], [], []
+    ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
+    precomputed_embeddings, ori_embeddings = [], []
+    le_classes = []
+    ori_idxs, nodes_kept = [], []
+    summary_predictions = defaultdict(list)
+
+    cont_num_iter, num_iter = 0, 0
+    for split in [split]:
+        path = base_path + split + "/"
+        for c in ["0", "1"]:
+            for pp in os.listdir(path + c + "/"):
+                # Read the explanation graph.
+                graph_id = int(pp.split("_")[1].split(".")[0])
+                gnn_pred = int(pp.split("_")[0])
+                summary_predictions["correct"].append(int(c))
+                # Note: adj is real valued. These rael values will become edge weights later on.
+                adj = np.load(path + c + "/" + pp, allow_pickle=True)
+                features = np.load(path + "features" + "/" + pp, allow_pickle=True)
+
+                if manual_cut is None:
+                    cut = elbow_method(np.triu(adj).flatten(), index_stopped, min_num_include=2)
+                else:
+                    cut = manual_cut
+
+                masked = copy.deepcopy(adj)
+                masked[masked < cut] = 0
+                masked[masked >= cut] = 1
+                # Default argument: edge_attr="weight"
+                # This edge_attr separates the adjacency and the edge weights.
+                G = nx.from_numpy_array(masked)
+
+                connected_components = list(nx.connected_components(G))
+                # only single nodes as connected component. No edges in the graph
+                if len(connected_components) == adj.shape[0]:
+                    # The local explainer couldn't find an explanation.
+                    # The explanatin grpah doesn't contain any edges.
+                    continue
+
+                added = 0
+                for cc in connected_components:
+                    # exclude cc containing a single node
+                    if len(cc) < 2:
+                        continue
+
+                    G1 = G.subgraph(cc)
+                    nodes_to_keep = list(G1.nodes())
+                    # to_keep = embedding[nodes_to_keep]
+                    to_keep = features[nodes_to_keep]
+                    for n in nodes_to_keep:
+                        G1.nodes[n]["atom_type"] = features[n].argmax(-1)
+                    
+                    # Let everyone be the same le_class
+                    le_classes.append(1)
+
+                    added += 1
+                    adjs.append(nx.to_numpy_array(G1))
+                    edge_weights.append(nx.get_edge_attributes(G1, "weight"))
+                    # `belonging` notes which graph the connected component belongs to.
+                    belonging.append(num_iter)
+                    nodes_kept.append(nodes_to_keep)
+                    ori_idxs.append(graph_id)
+                    precomputed_embeddings.append(to_keep)
+
+                if added:
+                    g = nx.from_numpy_array(adj) # build a graph from its connected components
+                    num_iter += 1 # counts how many graphs qualified the preprocessing.
+                    ori_adjs.append(adj)
+                    ori_embeddings.append(features)
+                    ori_edge_weights.append(nx.get_edge_attributes(g, "weight"))
+                    ori_classes.append(gnn_pred)
+
+                cont_num_iter += 1 # counts how many graphs have been processed.
+    belonging = utils.normalize_belonging(belonging)
+    # Now, not-found's 2 becomes 1, rest change from 1 to 0.
     le_classes = [l-1 for l in le_classes]
 
     return (

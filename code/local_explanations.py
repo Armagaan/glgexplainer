@@ -7,7 +7,6 @@ from networkx.generators import classic
 from collections import defaultdict
 import utils
 
-# base = "../local_explanations/"
 base = "../our_data/local_explanations/"
 
 house = nx.Graph()
@@ -137,6 +136,8 @@ def evaluate_cutting(ori_adjs, adjs):
 
 
 def read_bamultishapes(
+    size,
+    seed,
     explainer="PGExplainer",
     dataset="BAMultiShapes",
     model="GCN",
@@ -144,10 +145,10 @@ def read_bamultishapes(
     evaluate_method=False,
     remove_mix=False,
     min_num_include=5,
-    manual_cut=None
+    manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/{dataset}/{model}/"
+    base_path = base + f"{explainer}/BAMultiShapes/seed{seed}/{model}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging, ori_predictions = [], [], [], [], []
     precomputed_embeddings, gnn_embeddings = [], []
@@ -248,15 +249,17 @@ def read_bamultishapes(
 
 
 def read_mutagenicity(
+        size,
+        seed,
         explainer="PGExplainer",
         model="GCN",
         split="TRAIN",
         evaluate_method=True,
         min_num_include=None,
-        manual_cut=None
+        manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/Mutagenicity/{model}/"
+    base_path = base + f"{explainer}/Mutagenicity/seed{seed}/{model}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
     precomputed_embeddings, ori_embeddings = [], []
@@ -406,15 +409,17 @@ def read_mutagenicity(
 
 
 def read_mutag(
+        size,
+        seed,
         explainer="PGExplainer",
         model="GCN",
         split="TRAIN",
         evaluate_method=True,
         min_num_include=None,
-        manual_cut=None
+        manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/MUTAG/{model}/"
+    base_path = base + f"{explainer}/MUTAG/seed{seed}/{model}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
     precomputed_embeddings, ori_embeddings = [], []
@@ -505,15 +510,17 @@ def read_mutag(
 
 
 def read_nci1(
+        size,
+        seed,
         explainer="PGExplainer",
         model="GCN",
         split="TRAIN",
         evaluate_method=True,
         min_num_include=None,
-        manual_cut=None
+        manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/NCI1/{model}/"
+    base_path = base + f"{explainer}/NCI1/seed{seed}/{model}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
     precomputed_embeddings, ori_embeddings = [], []

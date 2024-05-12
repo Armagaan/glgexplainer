@@ -1,7 +1,7 @@
 import json
 import os
 from argparse import ArgumentParser
-from pickle import dump
+from pickle import dump, load
 
 import matplotlib.pyplot as plt
 import torch
@@ -17,19 +17,30 @@ parser = ArgumentParser()
 parser.add_argument("-t", "--trained", action="store_true",
                     help="Pass the flag if GLG has already been trained.")
 parser.add_argument("-d", "--device", type=str, default="cpu", choices=["cpu", "0", "1", "2", "3"])
-parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"], required=True)
+parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"],
+                    required=True)
+parser.add_argument("-s", "--seed", type=int, required=True, help="Training sets from multiple seeds"
+                    " are avaialbe. Supply the one to be used.")
+parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces different results when"
+                    "run multiple time. Use this to save the GLG's trained models under different"
+                    "runs.")
+parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
 args = parser.parse_args()
 print(args)
 
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
 
 # * Read hyper-parameters and data
 DATASET_NAME = "NCI1"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-PATH_GLG_MODEL = f"../our_data/trained_glg_models/{DATASET_NAME}_{args.explainer}.pt"
-PATH_GLG_PLOT = f"../our_data/plots/{DATASET_NAME}_{args.explainer}.png"
-PATH_CONCEPTS = f"../our_data/concepts/{DATASET_NAME}_{args.explainer}.pkl"
+SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}"
+PATH_GLG_MODEL = f"../our_data/trained_glg_models/{SUFFIX}.pt"
+PATH_GLG_PLOT = f"../our_data/plots/{SUFFIX}.png"
+PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
+PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
 
 from local_explanations import read_nci1
 
@@ -44,7 +55,9 @@ summary_predictions_train , \
 le_classes_train ,\
 embeddings_train = read_nci1(explainer=args.explainer,
                                      evaluate_method=False, 
-                                     split="TRAIN")
+                                     split="TRAIN",
+                                     seed=args.seed,
+                                     size=args.size)
 
 adjs_val , \
 edge_weights_val , \
@@ -55,7 +68,9 @@ summary_predictions_val , \
 le_classes_val ,\
 embeddings_val = read_nci1(explainer=args.explainer,
                                    evaluate_method=False, 
-                                   split="VAL")
+                                   split="VAL",
+                                   seed=args.seed,
+                                   size=args.size)
 
 adjs_test , \
 edge_weights_test , \
@@ -66,7 +81,9 @@ summary_predictions_test , \
 le_classes_test ,\
 embeddings_test = read_nci1(explainer=args.explainer,
                                     evaluate_method=False, 
-                                    split="TEST")
+                                    split="TEST",
+                                    seed=args.seed,
+                                    size=args.size)
 
 device = torch.device(f'cuda:{args.device}' if args.device != 'cpu' else 'cpu')
 transform = None
@@ -87,8 +104,6 @@ dataset_test  = utils.LocalExplanationsDataset("", adjs_test,  "embeddings", tra
 train_group_loader = utils.build_dataloader(dataset_train, belonging_train, num_input_graphs=128)
 val_group_loader   = utils.build_dataloader(dataset_val,   belonging_val,   num_input_graphs=256)
 test_group_loader  = utils.build_dataloader(dataset_test,  belonging_test,  num_input_graphs=256)
-
-torch.manual_seed(42)
 
 # Computes the graph embedding of single, disconnected local explanations.
 le_model = models.LEEmbedder(
@@ -119,16 +134,22 @@ if not args.trained:
     print("\n>>> Training GLGExplainer")
     expl.iterate(train_group_loader, val_group_loader, plot=False)
     torch.save(expl.state_dict(), PATH_GLG_MODEL)
+    with open(PATH_FORMULAE, "wb") as file:
+        dump(dict(explanations=expl.explanations, explanations_raw=expl.explanations_raw), file)
 else:
     expl.load_state_dict(torch.load(PATH_GLG_MODEL))
+    with open(PATH_FORMULAE, "rb") as file:
+        exps_dict = load(file)
+        expl.explanations = exps_dict["explanations"]
+        expl.explanations_raw = exps_dict["explanations_raw"]
 
 expl.eval()
 
 print("\n>>> Inspect train set")
-expl.inspect(train_group_loader, plot=True)
+expl.inspect(train_group_loader, testing_formulae=True)
 
 print("\n>>> Inspect test set")
-expl.inspect(test_group_loader, plot=True)
+expl.inspect(test_group_loader, testing_formulae=True)
 
 
 # * ----- Materialize Prototypes

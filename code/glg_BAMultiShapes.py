@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-from pickle import dump
+from pickle import dump, load
 
 from local_explanations import *
 import utils
@@ -17,45 +17,71 @@ parser.add_argument("-t", "--trained", action="store_true",
                     help="Pass the flag if GLG has already been trained.")
 parser.add_argument("-d", "--device", type=str, default="cpu", choices=["cpu", "0", "1", "2", "3"])
 parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"], required=True)
+parser.add_argument("-s", "--seed", type=int, required=True, help="Training sets from multiple seeds"
+                    " are avaialbe. Supply the one to be used.")
+parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces different results when"
+                    "run multiple time. Use this to save the GLG's trained models under different"
+                    "runs.")
+parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
 args = parser.parse_args()
 print(args)
+
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
 
 # * Read hyper-parameters and data
 DATASET_NAME = "BAMultiShapes"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-PATH_GLG_MODEL = f"../our_data/trained_glg_models/{DATASET_NAME}_{args.explainer}.pt"
-PATH_GLG_PLOT = f"../our_data/plots/{DATASET_NAME}_{args.explainer}.png"
-PATH_CONCEPTS = f"../our_data/concepts/{DATASET_NAME}_{args.explainer}.pkl"
+SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}"
+PATH_GLG_MODEL = f"../our_data/trained_glg_models/{SUFFIX}.pt"
+PATH_GLG_PLOT = f"../our_data/plots/{SUFFIX}.png"
+PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
+PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
 
 adjs_train, \
 edge_weights_train, \
 ori_classes_train, \
 belonging_train, \
 summary_predictions_train, \
-le_classes_train = read_bamultishapes(evaluate_method=False, remove_mix=False, min_num_include=5, split="TRAIN")
+le_classes_train = read_bamultishapes(evaluate_method=False,
+                                      remove_mix=False,
+                                      min_num_include=5,
+                                      split="TRAIN",
+                                      size=args.size,
+                                      seed=args.seed)
 
 adjs_val, \
 edge_weights_val, \
 ori_classes_val, \
 belonging_val, \
 summary_predictions_val, \
-le_classes_val = read_bamultishapes(evaluate_method=False, remove_mix=False, min_num_include=5, split="VAL")
+le_classes_val = read_bamultishapes(evaluate_method=False,
+                                    remove_mix=False,
+                                    min_num_include=5,
+                                    split="VAL",
+                                    size=args.size,
+                                    seed=args.seed)
 
 adjs_test, \
 edge_weights_test, \
 ori_classes_test, \
 belonging_test, \
 summary_predictions_test, \
-le_classes_test = read_bamultishapes(evaluate_method=False, remove_mix=False, min_num_include=5, split="TEST")
+le_classes_test = read_bamultishapes(evaluate_method=False,
+                                     remove_mix=False,
+                                     min_num_include=5,
+                                     split="TEST",
+                                     size=args.size,
+                                     seed=args.seed)
 
 
 # * Dataset
-device = torch.device(f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu')
+device = torch.device(f"cuda:{args.device}" if args.device != "cpu" else "cpu")
 transform = T.Compose([
     T.NormalizeFeatures(),
-])     
+])
 
 dataset_train = utils.LocalExplanationsDataset("", adjs_train, "same", transform=transform, y=le_classes_train, belonging=belonging_train, task_y=ori_classes_train)
 dataset_val   = utils.LocalExplanationsDataset("", adjs_val,   "same", transform=transform, y=le_classes_val,   belonging=belonging_val,   task_y=ori_classes_val)
@@ -68,7 +94,6 @@ val_group_loader   = utils.build_dataloader(dataset_val,   belonging_val,   num_
 test_group_loader  = utils.build_dataloader(dataset_test,  belonging_test,  num_input_graphs=256)
 
 
-torch.manual_seed(42)
 len_model = models.LEN(
     hyper_params["num_prototypes"],
     hyper_params["LEN_temperature"],
@@ -88,23 +113,30 @@ expl = models.GLGExplainer(
     hyper_params=hyper_params,
     classes_names=bamultishapes_classes_names,
     dataset_name=DATASET_NAME,
-    num_classes=4#len(train_group_loader.dataset.data.task_y.unique())
+    num_classes=2 #len(train_group_loader.dataset.data.task_y.unique())
 ).to(device)
 
 if not args.trained:
     print("\n>>> Training GLGExplainer")
     expl.iterate(train_group_loader, val_group_loader, plot=False)
     torch.save(expl.state_dict(), PATH_GLG_MODEL)
+    with open(PATH_FORMULAE, "wb") as file:
+        dump(dict(explanations=expl.explanations, explanations_raw=expl.explanations_raw), file)
 else:
     expl.load_state_dict(torch.load(PATH_GLG_MODEL))
+    with open(PATH_FORMULAE, "rb") as file:
+        exps_dict = load(file)
+        expl.explanations = exps_dict["explanations"]
+        expl.explanations_raw = exps_dict["explanations_raw"]
+
 
 expl.eval()
 
 print(">>> Inspect train set")
-expl.inspect(train_group_loader, plot=True)
+expl.inspect(train_group_loader, testing_formulae=True)
 
 print(">>> Inspect test set")
-expl.inspect(test_group_loader, plot=True)
+expl.inspect(test_group_loader, testing_formulae=True)
 
 
 # * Materialize prototypes
@@ -127,7 +159,7 @@ proto_names = {
     4: "House",
     5: "Grid",
 }
-torch.manual_seed(42)
+
 fig = plt.figure(figsize=(15,5*1.8))
 n = 0
 for p in range(expl.hyper["num_prototypes"]):

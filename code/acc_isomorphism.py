@@ -14,25 +14,35 @@ parser = ArgumentParser()
 parser.add_argument("-d", "--dataset", type=str, required=True,
                     choices=["MUTAG", "Mutagenicity", "BAMultiShapes", "NCI1"])
 parser.add_argument("-e", "--explainer", type=str, choices=["PGExplainer", "GNNExplainer"], required=True)
-parser.add_argument("-s", "--split", type=str, choices=["train", "val", "test"], default="test")
-parser.add_argument("--f0", type=str, required=True, help="Formula for class 0")
-parser.add_argument("--f1", type=str, required=True, help="Formula for class 1")
+parser.add_argument("--split", type=str, choices=["train", "val", "test"], default="test")
+parser.add_argument("-s", "--seed", type=int, required=True, help="Training sets from multiple seeds"
+                    " are avaialbe. Supply the one to be used.")
+parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces different results when"
+                    "run multiple time. Use this to save the GLG's trained models under different"
+                    "runs.")
+parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
 args = parser.parse_args()
 
+SUFFIX = f"{args.dataset}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}.pkl"
+PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}"
+PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}"
+PATH_MODEL = f"../our_data/{args.dataset}/model_{args.seed}.pt"
+PATH_DATA = f"../our_data/{args.dataset}/{args.split}_indices_{args.seed}.pkl"
+
+
 # * ----- Data
-with open(f"../our_data/concepts/{args.dataset}_{args.explainer}.pkl", "rb") as file:
+with open(PATH_CONCEPTS, "rb") as file:
     concepts = load(file)
-    for c in concepts.values():
-        if c is not None:
-            print(c.nodes)
+    # for c in concepts.values():
+    #     if c is not None:
+    #         print(c.nodes)
 
 if args.dataset == "BAMultiShapes":
     dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/BAMultiShapes")
 else:
     dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
 
-PATH = f"../our_data/{args.dataset}/"
-with open(f"{PATH}/{args.split}_indices.pkl", "rb") as file:
+with open(PATH_DATA, "rb") as file:
     indices = load(file)
 
 loader = pyg.loader.DataLoader(dataset[indices], batch_size=64, shuffle=False)
@@ -48,7 +58,7 @@ elif args.dataset == "NCI1":
 elif args.dataset == "BAMultiShapes":
     model = gnns.GIN_BAMultiShapesDataset()
 
-model.load_state_dict(torch.load(f"{PATH}/model.pt"))
+model.load_state_dict(torch.load(PATH_MODEL))
 model.eval()
 
 def predict_proba(loader):
@@ -123,16 +133,23 @@ for g_id, graph in enumerate(dataset[indices]):
         if matcher.subgraph_is_isomorphic():
             concept_vectors[g_id][c_id] = 1
 
+with open(PATH_FORMULAE, "rb") as file:
+    exps_dict = load(file)["explanations"]
+    formulae = [f for f in exps_dict if f is not None]
+
 acc, preds = test_explanations(
-    formulas=[args.f0, args.f1],
+    formulas=formulae,
     x=concept_vectors,
     y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in pred]),
     mask=torch.arange(len(indices), dtype=torch.long),
     material=False
 )
-f1_score_ = f1_score(y_true=pred, y_pred=preds.tolist(), average="weighted")
+# try:
+#     f1_score_ = f1_score(y_true=pred, y_pred=preds.tolist(), average="weighted")
+# except AttributeError:
+#     f1_score_ = None
 
-c0, c1 = torch.LongTensor(pred).unique(return_counts=True)[1].tolist()
-print(f"Class distribution: {c0 / (c0 + c1):.4f}, {c1 / (c0 + c1):.4f}")
-print(f"Accuracy: {acc:.4f}")
-print(f"F1 score: {f1_score_:.4f}")
+# c0, c1 = torch.LongTensor(pred).unique(return_counts=True)[1].tolist()
+# print(f"Class distribution: {c0 / (c0 + c1)}, {c1 / (c0 + c1)}")
+print(f"Accuracy: {acc}")
+# print(f"F1 score: {f1_score_}")

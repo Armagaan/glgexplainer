@@ -17,19 +17,31 @@ parser = ArgumentParser()
 parser.add_argument("-t", "--trained", action="store_true",
                     help="Pass the flag if GLG has already been trained.")
 parser.add_argument("-d", "--device", type=str, default="cpu", choices=["cpu", "0", "1", "2", "3"])
-parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"], required=True)
+parser.add_argument("-e", "--explainer", type=str, choices=["GNNExplainer", "PGExplainer"],
+                    required=True)
+parser.add_argument("-s", "--seed", type=int, required=True, help="Training sets from multiple seeds"
+                    " are avaialbe. Supply the one to be used.")
+parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces different results when"
+                    "run multiple time. Use this to save the GLG's trained models under different"
+                    "runs.")
+parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
 args = parser.parse_args()
 print(args)
+
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
 
 # * Read hyper-parameters and data
 DATASET_NAME = "Mutagenicity"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-PATH_GLG_MODEL = f"../our_data/trained_glg_models/{DATASET_NAME}_{args.explainer}.pt"
-PATH_GLG_PLOT = f"../our_data/plots/{DATASET_NAME}_{args.explainer}.png"
-PATH_CONCEPTS = f"../our_data/concepts/{DATASET_NAME}_{args.explainer}.pkl"
-PATH_FORMULAE = f"../our_data/formulae/{DATASET_NAME}_{args.explainer}.pkl"
+SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}"
+PATH_GLG_MODEL = f"../our_data/trained_glg_models/{SUFFIX}.pt"
+PATH_GLG_PLOT = f"../our_data/plots/{SUFFIX}.png"
+PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
+PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
+
 manual_cut = None # Armgaan: Our explanations may differ from the authors'
 hyper_params["manual_cut"] = manual_cut
 
@@ -47,7 +59,9 @@ le_classes_train ,\
 embeddings_train = read_mutagenicity(explainer=args.explainer,
                                      evaluate_method=False, 
                                      manual_cut=manual_cut,
-                                     split="TRAIN")
+                                     split="TRAIN",
+                                     seed=args.seed,
+                                     size=args.size)
 
 adjs_val , \
 edge_weights_val , \
@@ -59,7 +73,9 @@ le_classes_val ,\
 embeddings_val = read_mutagenicity(explainer=args.explainer,
                                    evaluate_method=False, 
                                    manual_cut=manual_cut,
-                                   split="VAL")
+                                   split="VAL",
+                                   seed=args.seed,
+                                   size=args.size)
 
 adjs_test , \
 edge_weights_test , \
@@ -71,7 +87,9 @@ le_classes_test ,\
 embeddings_test = read_mutagenicity(explainer=args.explainer,
                                     evaluate_method=False, 
                                     manual_cut=manual_cut,
-                                    split="TEST")
+                                    split="TEST",
+                                    seed=args.seed,
+                                    size=args.size)
 
 device = torch.device(f'cuda:{args.device}' if args.device != 'cpu' else 'cpu')
 transform = None
@@ -92,8 +110,6 @@ dataset_test  = utils.LocalExplanationsDataset("", adjs_test,  "embeddings", tra
 train_group_loader = utils.build_dataloader(dataset_train, belonging_train, num_input_graphs=128)
 val_group_loader   = utils.build_dataloader(dataset_val,   belonging_val,   num_input_graphs=256)
 test_group_loader  = utils.build_dataloader(dataset_test,  belonging_test,  num_input_graphs=256)
-
-torch.manual_seed(42)
 
 # Computes the graph embedding of single, disconnected local explanations.
 le_model = models.LEEmbedder(

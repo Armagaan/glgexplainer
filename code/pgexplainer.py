@@ -15,11 +15,12 @@ parser.add_argument("-d", "--dataset", type=str,
                     choices=["MUTAG", "Mutagenicity", "NCI1", "BAMultiShapes"], required=True)
 parser.add_argument("-t", "--trained", action="store_true")
 parser.add_argument("-s", "--seed", type=int, default=45)
+parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
 args = parser.parse_args()
 print(args)
-pyg.seed_everything(args.seed)
+pyg.seed_everything(42)
 
-print(">>> NOTE: Use 'pyg' conda environment for BAMultiShapes and NCI1. Use 'glg' for the rest.")
+# NOTE: Use 'pyg' conda environment for BAMultiShapes and NCI1. Use 'glg' for the rest.
 
 # * ----- Data & Model
 if args.dataset == "BAMultiShapes":
@@ -28,11 +29,11 @@ else:
     dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
 
 PATH = f"../our_data/{args.dataset}/"
-with open(f"{PATH}/train_indices.pkl", "rb") as reader:
+with open(f"{PATH}/train_indices_size{args.size}_{args.seed}.pkl", "rb") as reader:
     train_indices = pickle.load(reader)
-with open(f"{PATH}/val_indices.pkl", "rb") as reader:
+with open(f"{PATH}/val_indices_{args.seed}.pkl", "rb") as reader:
     val_indices = pickle.load(reader)
-with open(f"{PATH}/test_indices.pkl", "rb") as reader:
+with open(f"{PATH}/test_indices_{args.seed}.pkl", "rb") as reader:
     test_indices = pickle.load(reader)
 
 train_loader = pyg.loader.DataLoader(dataset[train_indices], batch_size=64, shuffle=False)
@@ -48,7 +49,7 @@ elif args.dataset == "NCI1":
 elif args.dataset == "BAMultiShapes":
     model = gnns.GIN_BAMultiShapesDataset()
 
-model.load_state_dict(torch.load(f"{PATH}/model.pt"))
+model.load_state_dict(torch.load(f"{PATH}/model_{args.seed}.pt"))
 model.eval()
 
 def predict_proba(loader):
@@ -130,12 +131,13 @@ explainer = Explainer(
 
 
 # * ----- Train PGExplainer
-PATH_DIR = f"../our_data/local_explanations/PGExplainer/{args.dataset}/GCN/"
+PATH_DIR = f"../our_data/local_explanations/PGExplainer/{args.dataset}/"\
+            f"seed{args.seed}/GCN/size{args.size}/"
 os.makedirs(PATH_DIR, exist_ok=True)
 
 if args.trained:
     print("Loading trained explainer")
-    explainer = torch.load(f"{PATH_DIR}/explainer.pt")
+    explainer = torch.load(f"{PATH_DIR}/explainer_{args.seed}.pt")
 else:
     model.eval()
     # Train in batches

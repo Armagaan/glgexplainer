@@ -23,6 +23,9 @@ class GLGExplainer(torch.nn.Module):
     def __init__(self, len_model, le_model, device, hyper_params, classes_names, dataset_name, num_classes):
         super().__init__()        
         
+        torch.manual_seed(42)
+        torch.cuda.manual_seed(42)
+
         self.le_model = le_model
         self.len_model = len_model
         
@@ -372,8 +375,10 @@ class GLGExplainer(torch.nn.Module):
                 accuracy, preds = test_explanations([explanation0, explanation1], x_train, y_train_1h, mask=torch.arange(x_train.shape[0]).long(), material=False)
                 logic_acc = hmean([accuracy0, accuracy1])
 
-            if plot: print("Accuracy as classifier: ", round(accuracy, 4))
-            if plot: print("LEN fidelity: ", sum(y_train_1h[:, :].eq(y_pred[:, :] > 0).sum(1) == self.num_classes) / len(y_pred))
+            if testing_formulae:
+                # Accuracy is wrt formula. Fidelity is wrt LEN model.
+                print("Accuracy as classifier: ", round(accuracy, 4))
+                print("LEN fidelity: ", sum(y_train_1h[:, :].eq(y_pred[:, :] > 0).sum(1) == self.num_classes) / len(y_pred))
             
             print()
             if log_wandb: self.log({"train": {'logic_acc': logic_acc, "logic_acc_clf": accuracy}})
@@ -495,6 +500,9 @@ class LEEmbedder(torch.nn.Module):
     def __init__(self, num_features, activation, num_gnn_hidden=20, dropout=0.1, num_hidden=10, num_layers=2, backbone="GIN"):
         super().__init__()
 
+        torch.manual_seed(42)
+        torch.cuda.manual_seed(42)
+
         if backbone == "GIN":
             nns = torch.nn.ModuleList([
                 torch.nn.Sequential(
@@ -566,6 +574,8 @@ class LEEmbedder(torch.nn.Module):
 
 
 def LEN(input_shape, temperature, n_classes=2, remove_attention=False):
+    torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     layers = [
         te.nn.EntropyLinear(input_shape, 10, n_classes=n_classes, temperature=temperature, remove_attention=remove_attention),
         torch.nn.LeakyReLU(),

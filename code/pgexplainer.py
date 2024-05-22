@@ -2,6 +2,7 @@ import os
 import pickle
 import shutil
 from argparse import ArgumentParser
+from inspect import signature
 
 import torch
 import torch_geometric as pyg
@@ -16,6 +17,11 @@ parser.add_argument("-d", "--dataset", type=str,
 parser.add_argument("-t", "--trained", action="store_true")
 parser.add_argument("-s", "--seed", type=int, default=45)
 parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
+parser.add_argument("-a", "--arch", type=str, help="Choose GNN architecture",
+                    choices=["gcn", "gin", "gat"], required=True)
+parser.add_argument("-p", "--pooling", type=str, help="Pooling layer",
+                    choices=["sum", "mean", "max"], required=True)
+
 args = parser.parse_args()
 print(args)
 pyg.seed_everything(42)
@@ -24,9 +30,15 @@ pyg.seed_everything(42)
 
 # * ----- Data & Model
 if args.dataset == "BAMultiShapes":
-    dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/BAMultiShapes")
+    if args.arch == "gin":
+        dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/gin_data/BAMultiShapes")
+    else:
+        dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/BAMultiShapes")
 else:
-    dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
+    if args.arch == "gin":
+        dataset = pyg.datasets.TUDataset(root="../our_data/gin_data/", name=args.dataset)
+    else:
+        dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
 
 PATH = f"../our_data/{args.dataset}/"
 with open(f"{PATH}/train_indices_size{args.size}_{args.seed}.pkl", "rb") as reader:
@@ -40,23 +52,27 @@ train_loader = pyg.loader.DataLoader(dataset[train_indices], batch_size=64, shuf
 val_loader   = pyg.loader.DataLoader(dataset[val_indices],   batch_size=64, shuffle=False)
 test_loader  = pyg.loader.DataLoader(dataset[test_indices],  batch_size=64, shuffle=False)
 
-if args.dataset == "MUTAG":
-    model = gnns.GAT_MUTAG()
-elif args.dataset == "Mutagenicity":
-    model = gnns.GAT_Mutagenicity()
-elif args.dataset == "NCI1":
-    model = gnns.GIN_NCI1()
-elif args.dataset == "BAMultiShapes":
-    model = gnns.GIN_BAMultiShapesDataset()
+model = eval(f"gnns.{args.arch.upper()}_{args.dataset}(pooling='{args.pooling}')")
+PATH_MODEL = f"{PATH}/model_{args.seed}_{args.arch}_{args.pooling}.pt"
+if not os.path.exists(PATH_MODEL):
+    print("Model weights not found")
+    exit(1)
 
-model.load_state_dict(torch.load(f"{PATH}/model_{args.seed}.pt"))
+try:
+    state_dict = torch.load(PATH_MODEL)
+    model.load_state_dict(state_dict)
+except RuntimeError:
+    print("Model trained on different pyg version")
+    exit(1)
+
 model.eval()
+model_signature_params = [i.name for i in signature(model.forward).parameters.values()]
 
 def predict_proba(loader):
     pred_proba_list = []
     for data in loader:
         model_args = dict(x=data.x, edge_index=data.edge_index, batch=data.batch)
-        if hasattr(data, "edge_attr") and data.edge_attr is not None:
+        if hasattr(data, "edge_attr") and "edge_attr" in model_signature_params and data.edge_attr is not None:
             model_args["edge_attr"] = data.edge_attr
         pred_proba = model(**model_args)
         # pred_proba is a list of lists
@@ -68,7 +84,7 @@ def predict(loader):
     predictions = []
     for data in loader:
         model_args = dict(x=data.x, edge_index=data.edge_index, batch=data.batch)
-        if hasattr(data, "edge_attr") and data.edge_attr is not None:
+        if hasattr(data, "edge_attr") and "edge_attr" in model_signature_params and data.edge_attr is not None:
             model_args["edge_attr"] = data.edge_attr
         out= model(**model_args)
         pred = out.argmax(dim=1)
@@ -132,7 +148,7 @@ explainer = Explainer(
 
 # * ----- Train PGExplainer
 PATH_DIR = f"../our_data/local_explanations/PGExplainer/{args.dataset}/"\
-            f"seed{args.seed}/GCN/size{args.size}/"
+            f"seed{args.seed}/{args.arch.upper()}/{args.pooling.upper()}/size{args.size}/"
 os.makedirs(PATH_DIR, exist_ok=True)
 
 if args.trained:
@@ -144,7 +160,7 @@ else:
     for epoch in tqdm(range(coeffs['epochs']), colour="green", desc="Training"):
         for data in train_loader:
             model_args = dict(x=data.x, edge_index=data.edge_index, batch=data.batch)
-            if hasattr(data, "edge_attr") and data.edge_attr is not None:
+            if hasattr(data, "edge_attr") and "edge_attr" in model_signature_params and data.edge_attr is not None:
                 model_args["edge_attr"] = data.edge_attr
             target = model(**model_args).argmax(dim=1)
             loss = explainer.algorithm.train(
@@ -170,7 +186,7 @@ for split in ["train", "val", "test"]:
     )):
         graph = dataset[index]
         graph_args = dict(x=graph.x, edge_index=graph.edge_index, batch=None)
-        if hasattr(graph, "edge_attr") and graph.edge_attr is not None:
+        if hasattr(graph, "edge_attr") and graph.edge_attr is not None and "edge_attr" in model_signature_params:
             graph_args["edge_attr"] = graph.edge_attr
         explanation = explainer(
             **graph_args,

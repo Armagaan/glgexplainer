@@ -12,7 +12,7 @@ import gnns
 
 parser = ArgumentParser()
 parser.add_argument("-d", "--dataset", type=str,
-                    choices=["MUTAG", "Mutagenicity", "NCI1", "BAMultiShapesDataset"], required=True)
+                    choices=["MUTAG", "Mutagenicity", "NCI1", "BAMultiShapes"], required=True)
 parser.add_argument("-s", "--seed", type=int, default=45)
 args = parser.parse_args()
 print(args)
@@ -22,7 +22,7 @@ pyg.seed_everything(args.seed)
 # * ----- Data & Model
 if args.dataset in ["MUTAG", "Mutagenicity", "NCI1"]:
     dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
-elif args.dataset == "BAMultiShapesDataset":
+elif args.dataset == "BAMultiShapes":
     dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/BAMultiShapes")
 
 PATH = f"../our_data/{args.dataset}/"
@@ -43,7 +43,7 @@ elif args.dataset == "Mutagenicity":
     model = gnns.GAT_Mutagenicity()
 elif args.dataset == "NCI1":
     model = gnns.GAT_NCI1()
-elif args.dataset == "BAMultiShapesDataset":
+elif args.dataset == "BAMultiShapes":
     model = ... #todo GIN isn't compatible as of now.
 
 model.load_state_dict(torch.load(f"{PATH}/model.pt"))

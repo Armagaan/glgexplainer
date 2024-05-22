@@ -2,7 +2,7 @@ import pickle
 import torch
 import torch_geometric as pyg
 
-from gnns import GIN_BAMultiShapesDataset
+from gnns import GIN_BAMultiShapes
 
 pyg.seed_everything(7)
 TRAINED = True
@@ -22,7 +22,7 @@ train_loader = pyg.loader.DataLoader(dataset[train_indices], batch_size=64, shuf
 val_loader   = pyg.loader.DataLoader(dataset[val_indices]  , batch_size=64, shuffle=False)
 test_loader  = pyg.loader.DataLoader(dataset[test_indices] , batch_size=64, shuffle=False)
 
-model = GIN_BAMultiShapesDataset()
+model = GIN_BAMultiShapes()
 
 opt = torch.optim.Adam(params=model.parameters(), lr=1e-2)
 loss_func = torch.nn.CrossEntropyLoss()

@@ -78,7 +78,7 @@ class GLGExplainer(torch.nn.Module):
             y = torch.concat([y, data.task_y], dim=0)
             
         y = scatter(y, new_belonging, dim=0, reduce="max")
-        y = torch.nn.functional.one_hot(y.long()).float().to(self.device)
+        y = torch.nn.functional.one_hot(y.long(), num_classes=self.num_classes).float().to(self.device)
              
         le_assignments = utils.prototype_assignement(self.hyper["assign_func"], le_embeddings, self.prototype_vectors, temp=1)        
         concept_vector = scatter(le_assignments, new_belonging, dim=0, reduce="max")

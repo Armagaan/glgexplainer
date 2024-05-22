@@ -138,6 +138,7 @@ def evaluate_cutting(ori_adjs, adjs):
 def read_bamultishapes(
     size,
     seed,
+    pooling,
     explainer="PGExplainer",
     dataset="BAMultiShapes",
     model="GCN",
@@ -148,7 +149,7 @@ def read_bamultishapes(
     manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/BAMultiShapes/seed{seed}/{model}/size{size}/"
+    base_path = base + f"{explainer}/BAMultiShapes/seed{seed}/{model.upper()}/{pooling.upper()}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging, ori_predictions = [], [], [], [], []
     precomputed_embeddings, gnn_embeddings = [], []
@@ -251,6 +252,7 @@ def read_bamultishapes(
 def read_mutagenicity(
         size,
         seed,
+        pooling,
         explainer="PGExplainer",
         model="GCN",
         split="TRAIN",
@@ -259,7 +261,7 @@ def read_mutagenicity(
         manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/Mutagenicity/seed{seed}/{model}/size{size}/"
+    base_path = base + f"{explainer}/Mutagenicity/seed{seed}/{model.upper()}/{pooling.upper()}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
     precomputed_embeddings, ori_embeddings = [], []
@@ -411,6 +413,7 @@ def read_mutagenicity(
 def read_mutag(
         size,
         seed,
+        pooling,
         explainer="PGExplainer",
         model="GCN",
         split="TRAIN",
@@ -419,7 +422,7 @@ def read_mutag(
         manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/MUTAG/seed{seed}/{model}/size{size}/"
+    base_path = base + f"{explainer}/MUTAG/seed{seed}/{model.upper()}/{pooling.upper()}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
     precomputed_embeddings, ori_embeddings = [], []
@@ -512,6 +515,7 @@ def read_mutag(
 def read_nci1(
         size,
         seed,
+        pooling,
         explainer="PGExplainer",
         model="GCN",
         split="TRAIN",
@@ -520,7 +524,7 @@ def read_nci1(
         manual_cut=None,
 ):
     """read local explanations and cut them based on a certain policy"""
-    base_path = base + f"{explainer}/NCI1/seed{seed}/{model}/size{size}/"
+    base_path = base + f"{explainer}/NCI1/seed{seed}/{model.upper()}/{pooling.upper()}/size{size}/"
     adjs, edge_weights, index_stopped = [], [], []
     ori_adjs, ori_edge_weights, ori_classes, belonging = [], [], [], []
     precomputed_embeddings, ori_embeddings = [], []

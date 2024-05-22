@@ -1,12 +1,15 @@
 """Compute the accuracy replacing distance a prototype by the subgraph closest to it."""
+import os
 from argparse import ArgumentParser
 from pickle import load
+from inspect import signature
+from pprint import pprint
 
 import networkx as nx
 from sklearn.metrics import f1_score
 import torch
 import torch_geometric as pyg
-from torch_explain.logic.metrics import test_explanations
+from torch_explain.logic.metrics import test_explanations, test_explanation
 
 import gnns
 
@@ -21,13 +24,19 @@ parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces diff
                     "run multiple time. Use this to save the GLG's trained models under different"
                     "runs.")
 parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
+parser.add_argument("-a", "--arch", type=str, help="gnn architecture", choices=["gcn", "gin", "gat"], required=True)
+parser.add_argument("-p", "--pooling", type=str, help="gnn pooling layer", choices=["sum", "mean", "max"], required=True)
+
 args = parser.parse_args()
 
-SUFFIX = f"{args.dataset}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}.pkl"
+SUFFIX = f"{args.dataset}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}_{args.arch}_{args.pooling}.pkl"
 PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}"
 PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}"
-PATH_MODEL = f"../our_data/{args.dataset}/model_{args.seed}.pt"
-PATH_DATA = f"../our_data/{args.dataset}/{args.split}_indices_{args.seed}.pkl"
+PATH_MODEL = f"../our_data/{args.dataset}/model_{args.seed}_{args.arch}_{args.pooling}.pt"
+if args.split == "train":
+    PATH_DATA = f"../our_data/{args.dataset}/{args.split}_indices_size{args.size}_{args.seed}.pkl"
+else:
+    PATH_DATA = f"../our_data/{args.dataset}/{args.split}_indices_{args.seed}.pkl"
 
 
 # * ----- Data
@@ -38,9 +47,15 @@ with open(PATH_CONCEPTS, "rb") as file:
     #         print(c.nodes)
 
 if args.dataset == "BAMultiShapes":
-    dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/BAMultiShapes")
+    if args.arch == "gin":
+        dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/gin_data/BAMultiShapes")
+    else:
+        dataset = pyg.datasets.BAMultiShapesDataset(root="../our_data/BAMultiShapes")
 else:
-    dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
+    if args.arch == "gin":
+        dataset = pyg.datasets.TUDataset(root="../our_data/gin_data/", name=args.dataset)
+    else:
+        dataset = pyg.datasets.TUDataset(root="../our_data/", name=args.dataset)
 
 with open(PATH_DATA, "rb") as file:
     indices = load(file)
@@ -49,22 +64,26 @@ loader = pyg.loader.DataLoader(dataset[indices], batch_size=64, shuffle=False)
 
 
 # * ----- Model
-if args.dataset == "MUTAG":
-    model = gnns.GAT_MUTAG()
-elif args.dataset == "Mutagenicity":
-    model = gnns.GAT_Mutagenicity()
-elif args.dataset == "NCI1":
-    model = gnns.GIN_NCI1()
-elif args.dataset == "BAMultiShapes":
-    model = gnns.GIN_BAMultiShapesDataset()
+model = eval(f"gnns.{args.arch.upper()}_{args.dataset}(pooling='{args.pooling}')")
 
-model.load_state_dict(torch.load(PATH_MODEL))
+if not os.path.exists(PATH_MODEL):
+    print("Model weights not found")
+    exit(1)
+
+try:
+    state_dict = torch.load(PATH_MODEL)
+    model.load_state_dict(state_dict)
+except RuntimeError:
+    print("Model trained on different pyg version")
+    exit(1)
+
 model.eval()
+model_signature_params = [i.name for i in signature(model.forward).parameters.values()]
 
 def predict_proba(loader):
     pred_proba_list = []
     for data in loader:
-        if hasattr(data, "edge_attr") and data.edge_attr is not None:
+        if hasattr(data, "edge_attr") and "edge_attr" in model_signature_params and data.edge_attr is not None:
             pred_proba = model(
                 x=data.x,
                 edge_index=data.edge_index,
@@ -85,7 +104,7 @@ def predict_proba(loader):
 def predict(loader):
     predictions = []
     for data in loader:
-        if hasattr(data, "edge_attr") and data.edge_attr is not None:
+        if hasattr(data, "edge_attr") and "edge_attr" in model_signature_params and data.edge_attr is not None:
             out= model(
                 x=data.x,
                 edge_index=data.edge_index,
@@ -134,16 +153,40 @@ for g_id, graph in enumerate(dataset[indices]):
             concept_vectors[g_id][c_id] = 1
 
 with open(PATH_FORMULAE, "rb") as file:
+    class_present = []
     exps_dict = load(file)["explanations"]
-    formulae = [f for f in exps_dict if f is not None]
+    formulae = []
+    for i, f in enumerate(exps_dict):
+        if f is None or f == "":
+            continue
+        formulae.append(f)
+        class_present.append(i)
+    print("Formulae:")
+    for i, f in zip(class_present, formulae):
+        print(i, ":", f)
+    print()
 
-acc, preds = test_explanations(
-    formulas=formulae,
-    x=concept_vectors,
-    y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in pred]),
-    mask=torch.arange(len(indices), dtype=torch.long),
-    material=False
-)
+if len(class_present) == 0:
+    print("No formulae")
+    exit(0)
+elif len(class_present) == 1:
+    target_class = class_present[0]
+    acc, preds = test_explanation(
+        formula=formulae[0],
+        x=concept_vectors,
+        y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in pred]),
+        target_class=target_class,
+        mask=torch.arange(len(indices), dtype=torch.long),
+        material=False
+    )
+else:
+    acc, preds = test_explanations(
+        formulas=formulae,
+        x=concept_vectors,
+        y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in pred]),
+        mask=torch.arange(len(indices), dtype=torch.long),
+        material=False
+    )
 # try:
 #     f1_score_ = f1_score(y_true=pred, y_pred=preds.tolist(), average="weighted")
 # except AttributeError:

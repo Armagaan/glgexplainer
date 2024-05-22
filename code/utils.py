@@ -245,7 +245,8 @@ def assemble_raw_explanations(explanations_raw):
         ret.append(f"({expl})")
     return " | ".join(ret)
 
-def plot_molecule(data, adj=None, node_features=None, composite_plot=False):
+def plot_mutagenicity_molecule(data, adj=None, node_features=None, composite_plot=False):
+    """Plots molecules from Mutagenicity dataset."""
     if adj is None and node_features is None:
         G = to_networkx(data)
     else:
@@ -301,6 +302,107 @@ def plot_molecule(data, adj=None, node_features=None, composite_plot=False):
         plt.axis('off')
         plt.show()
 
+def plot_mutag_molecule(data, adj=None, node_features=None, composite_plot=False):
+    """Plots molecules from MUTAG dataset."""
+    if adj is None and node_features is None:
+        G = to_networkx(data)
+    else:
+        G = nx.from_numpy_array(adj)
+    node_label = data.x.argmax(-1) if node_features is None else node_features.argmax(-1)
+    max_label = node_label.max() + 1
+    nmb_nodes = len(node_label)
+    
+    colors = ['orange', 'lightseagreen', 'red', 'orchid', 'bisque', 'lime', 'darksalmon']
+    color_to_atom = {
+        'orange': "C",
+        'lightseagreen': "N",
+        'red': "O",
+        'orchid': "F",
+        'bisque': "I",
+        'lime': "Cl",
+        'darksalmon': "Br",
+    }
+
+    label2nodes = []
+    for i in range(max_label):
+        label2nodes.append([])
+    for i in range(nmb_nodes):
+        if i in G.nodes():
+            label2nodes[node_label[i]].append(i)
+            
+    if adj is not None and node_features is not None:
+        G.remove_edges_from(nx.selfloop_edges(G))
+        G.remove_nodes_from(list(nx.isolates(G)))
+            
+    pos = nx.kamada_kawai_layout(G)
+    for i in range(max_label):
+        node_filter = []
+        for j in range(len(label2nodes[i])):
+            node_filter.append(label2nodes[i][j])
+        nx.draw_networkx_nodes(G, pos,
+                               nodelist=node_filter,
+                               node_color=colors[i],
+                               node_size=300)
+        nx.draw_networkx_labels(G, pos, {k:color_to_atom[colors[i]] for k in node_filter})
+
+    nx.draw_networkx_edges(G, pos, width=2, edge_color='grey')
+    plt.box(False)
+
+    if not composite_plot:
+        plt.axis('off')
+        plt.show()
+
+def plot_nci1_molecule(data, adj=None, node_features=None, composite_plot=False):
+    """Plots molecules from MUTAG dataset."""
+    if adj is None and node_features is None:
+        G = to_networkx(data)
+    else:
+        G = nx.from_numpy_array(adj)
+    node_label = data.x.argmax(-1) if node_features is None else node_features.argmax(-1)
+    max_label = node_label.max() + 1
+    nmb_nodes = len(node_label)
+    
+    colors = [
+        'tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+        'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan',
+        'red', 'darkorange', 'orange', 'gold', 'yellow', 'yellowgreen',
+        'limegreen', 'lightgreen', 'palegreen', 'aquamarine', 'lightcyan',
+        'royalblue', 'dodgerblue', 'navy', 'darkblue', 'mediumblue',
+        'blue', 'darkviolet', 'purple', 'magenta', 'fuchsia', 'pink',
+        'lightcoral', 'coral', 'darkred', 'maroon', 'black', 'gray',
+        'lightgray'
+    ]
+
+    color_to_atom = {color:i for i, color in enumerate(colors)}
+
+    label2nodes = []
+    for i in range(max_label):
+        label2nodes.append([])
+    for i in range(nmb_nodes):
+        if i in G.nodes():
+            label2nodes[node_label[i]].append(i)
+            
+    if adj is not None and node_features is not None:
+        G.remove_edges_from(nx.selfloop_edges(G))
+        G.remove_nodes_from(list(nx.isolates(G)))
+            
+    pos = nx.kamada_kawai_layout(G)
+    for i in range(max_label):
+        node_filter = []
+        for j in range(len(label2nodes[i])):
+            node_filter.append(label2nodes[i][j])
+        nx.draw_networkx_nodes(G, pos,
+                               nodelist=node_filter,
+                               node_color=colors[i],
+                               node_size=300)
+        nx.draw_networkx_labels(G, pos, {k:color_to_atom[colors[i]] for k in node_filter})
+
+    nx.draw_networkx_edges(G, pos, width=2, edge_color='grey')
+    plt.box(False)
+
+    if not composite_plot:
+        plt.axis('off')
+        plt.show()
 
 def convert_hin_labels(g):
     new_dict = dict()

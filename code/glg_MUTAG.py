@@ -25,6 +25,8 @@ parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces diff
                     "run multiple time. Use this to save the GLG's trained models under different"
                     "runs.")
 parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
+parser.add_argument("-a", "--arch", type=str, help="gnn architecture", choices=["gcn", "gin", "gat"], required=True)
+parser.add_argument("-p", "--pooling", type=str, help="gnn pooling layer", choices=["sum", "mean", "max"], required=True)
 args = parser.parse_args()
 print(args)
 
@@ -36,9 +38,10 @@ DATASET_NAME = "MUTAG"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}"
+SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}_{args.arch}_{args.pooling}"
 PATH_GLG_MODEL = f"../our_data/trained_glg_models/{SUFFIX}.pt"
 PATH_GLG_PLOT = f"../our_data/plots/{SUFFIX}.png"
+PATH_GLG_PLOT_RANDOM = f"../our_data/plots_random/{SUFFIX}.png"
 PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
 PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
 
@@ -57,7 +60,9 @@ embeddings_train = read_mutag(explainer=args.explainer,
                                      evaluate_method=False, 
                                      split="TRAIN",
                                      seed=args.seed,
-                                     size=args.size)
+                                     size=args.size,
+                                     model=args.arch,
+                                     pooling=args.pooling)
 
 adjs_val , \
 edge_weights_val , \
@@ -70,7 +75,9 @@ embeddings_val = read_mutag(explainer=args.explainer,
                                    evaluate_method=False, 
                                    split="VAL",
                                    seed=args.seed,
-                                   size=args.size)
+                                   size=args.size,
+                                   model=args.arch,
+                                   pooling=args.pooling)
 
 adjs_test , \
 edge_weights_test , \
@@ -83,7 +90,9 @@ embeddings_test = read_mutag(explainer=args.explainer,
                                     evaluate_method=False, 
                                     split="TEST",
                                     seed=args.seed,
-                                    size=args.size)
+                                    size=args.size,
+                                    model=args.arch,
+                                    pooling=args.pooling)
 
 device = torch.device(f'cuda:{args.device}' if args.device != 'cpu' else 'cpu')
 transform = None
@@ -181,10 +190,11 @@ concepts_assignment = utils.prototype_assignement(
 )
 
 proto_names = {
-    0: "Others",
-    1: "NH2, NO2",
+    0: "P0",
+    1: "P1",
 }
 
+# * closeset
 torch.manual_seed(42)
 fig = plt.figure(figsize=(17,4))
 n = 0
@@ -197,13 +207,32 @@ for p in range(expl.hyper["num_prototypes"]):
     for ex in range(5):
         n += 1
         plt.subplot(expl.hyper["num_prototypes"],5,n)
-        utils.plot_molecule(dataset_train[int(idxs[ex])], composite_plot=True)
+        utils.plot_mutag_molecule(dataset_train[int(idxs[ex])], composite_plot=True)
 
 for p in range(expl.hyper["num_prototypes"]):
     plt.subplot(expl.hyper["num_prototypes"],5,5*p + 1)
     plt.ylabel(f"$P_{p}$\n {proto_names[p]}", size=25, rotation="horizontal", labelpad=50)
 plt.savefig(PATH_GLG_PLOT)
 
+# * random
+torch.manual_seed(42)
+fig = plt.figure(figsize=(17,4))
+n = 0
+for p in range(expl.hyper["num_prototypes"]):
+    # idxs = le_idxs[concepts_assignment.argmax(-1) == p]
+    idxs = le_idxs[torch.randperm(len(le_idxs))] # for random examples
+    sa = concepts_assignment[concepts_assignment.argmax(-1) == p]
+    idxs = idxs[torch.argsort(sa[:, p], descending=True)]
+
+    for ex in range(5):
+        n += 1
+        plt.subplot(expl.hyper["num_prototypes"],5,n)
+        utils.plot_mutag_molecule(dataset_train[int(idxs[ex])], composite_plot=True)
+
+for p in range(expl.hyper["num_prototypes"]):
+    plt.subplot(expl.hyper["num_prototypes"],5,5*p + 1)
+    plt.ylabel(f"{proto_names[p]}", size=25, rotation="horizontal", labelpad=50)
+plt.savefig(PATH_GLG_PLOT_RANDOM)
 
 # * ----- For calculating accuracy, find the closest local explanation to a prototype as its replacement
 def glg_to_nx(subgraph):

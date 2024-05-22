@@ -23,6 +23,8 @@ parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces diff
                     "run multiple time. Use this to save the GLG's trained models under different"
                     "runs.")
 parser.add_argument("--size", type=float, default=1.0, help="Percentage of training dataset.")
+parser.add_argument("-a", "--arch", type=str, help="gnn architecture", choices=["gcn", "gin", "gat"], required=True)
+parser.add_argument("-p", "--pooling", type=str, help="gnn pooling layer", choices=["sum", "mean", "max"], required=True)
 args = parser.parse_args()
 print(args)
 
@@ -34,9 +36,10 @@ DATASET_NAME = "BAMultiShapes"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}"
+SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}_{args.arch}_{args.pooling}"
 PATH_GLG_MODEL = f"../our_data/trained_glg_models/{SUFFIX}.pt"
 PATH_GLG_PLOT = f"../our_data/plots/{SUFFIX}.png"
+PATH_GLG_PLOT_RANDOM = f"../our_data/plots_random/{SUFFIX}.png"
 PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
 PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
 
@@ -50,7 +53,9 @@ le_classes_train = read_bamultishapes(evaluate_method=False,
                                       min_num_include=5,
                                       split="TRAIN",
                                       size=args.size,
-                                      seed=args.seed)
+                                      seed=args.seed,
+                                      model=args.arch,
+                                      pooling=args.pooling)
 
 adjs_val, \
 edge_weights_val, \
@@ -62,7 +67,9 @@ le_classes_val = read_bamultishapes(evaluate_method=False,
                                     min_num_include=5,
                                     split="VAL",
                                     size=args.size,
-                                    seed=args.seed)
+                                    seed=args.seed,
+                                    model=args.arch,
+                                    pooling=args.pooling)
 
 adjs_test, \
 edge_weights_test, \
@@ -74,7 +81,9 @@ le_classes_test = read_bamultishapes(evaluate_method=False,
                                      min_num_include=5,
                                      split="TEST",
                                      size=args.size,
-                                     seed=args.seed)
+                                     seed=args.seed,
+                                     model=args.arch,
+                                     pooling=args.pooling)
 
 
 # * Dataset
@@ -152,14 +161,15 @@ print("\n>>> Visualize")
 ) = expl.get_concept_vector(test_group_loader, return_raw=True)
 
 proto_names = {
-    0: "BA",
-    1: "Wheel",
-    2: "Mix",
-    3: "Grid",
-    4: "House",
-    5: "Grid",
+    0: "P0",
+    1: "P1",
+    2: "P2",
+    3: "P3",
+    4: "P4",
+    5: "P5",
 }
 
+# * closest local explanations
 fig = plt.figure(figsize=(15,5*1.8))
 n = 0
 for p in range(expl.hyper["num_prototypes"]):
@@ -180,6 +190,28 @@ for p in range(expl.hyper["num_prototypes"]):
     plt.subplot(expl.hyper["num_prototypes"],5,5*p + 1)
     plt.ylabel(f"$P_{p}$\n {proto_names[p]}", size=25, rotation="horizontal", labelpad=50)
 plt.savefig(PATH_GLG_PLOT)
+
+# * random explanations
+fig = plt.figure(figsize=(15,5*1.8))
+n = 0
+for p in range(expl.hyper["num_prototypes"]):
+    # idxs = le_idxs[concepts_assignment.argmax(-1) == p]
+    idxs = le_idxs[torch.randperm(len(le_idxs))]    # random 
+    sa = concepts_assignment[concepts_assignment.argmax(-1) == p]
+    idxs = idxs[torch.argsort(sa[:, p], descending=True)]
+    for ex in range(min(5, len(idxs))):
+        n += 1
+        ax = plt.subplot(expl.hyper["num_prototypes"],5,n)      
+        G = to_networkx(dataset_test[int(idxs[ex])], to_undirected=True)
+        pos = nx.spring_layout(G, seed=42)
+        nx.draw(G, pos, node_size=20, ax=ax, node_color="orange")
+        ax.axis("on")
+        plt.box(False)
+        
+for p in range(expl.hyper["num_prototypes"]):
+    plt.subplot(expl.hyper["num_prototypes"],5,5*p + 1)
+    plt.ylabel(f"{proto_names[p]}", size=25, rotation="horizontal", labelpad=50)
+plt.savefig(PATH_GLG_PLOT_RANDOM)
 
 
 # * ----- For calculating accuracy, find the closest local explanation to a prototype as its replacement

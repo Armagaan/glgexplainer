@@ -3,10 +3,8 @@ import os
 from argparse import ArgumentParser
 from pickle import load
 from inspect import signature
-from pprint import pprint
 
 import networkx as nx
-from sklearn.metrics import f1_score
 import torch
 import torch_geometric as pyg
 from torch_explain.logic.metrics import test_explanations, test_explanation
@@ -17,7 +15,7 @@ parser = ArgumentParser()
 parser.add_argument("-d", "--dataset", type=str, required=True,
                     choices=["MUTAG", "Mutagenicity", "BAMultiShapes", "NCI1"])
 parser.add_argument("-e", "--explainer", type=str, choices=["PGExplainer", "GNNExplainer"], required=True)
-parser.add_argument("--split", type=str, choices=["train", "val", "test"], default="test")
+parser.add_argument("--split", type=str, choices=["train", "test"], default="test")
 parser.add_argument("-s", "--seed", type=int, required=True, help="Training sets from multiple seeds"
                     " are avaialbe. Supply the one to be used.")
 parser.add_argument("-r", "--run", type=int, default=-1, help="GLG produces different results when"
@@ -29,10 +27,15 @@ parser.add_argument("-p", "--pooling", type=str, help="gnn pooling layer", choic
 
 args = parser.parse_args()
 
-SUFFIX = f"{args.dataset}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}_{args.arch}_{args.pooling}.pkl"
-PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}"
-PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}"
+SUFFIX = f"{args.dataset}_{args.explainer}_{args.arch}_{args.pooling}_size{args.size}_seed{args.seed}_run{args.run}"
+PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
+PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
 PATH_MODEL = f"../our_data/{args.dataset}/model_{args.seed}_{args.arch}_{args.pooling}.pt"
+PATH_TRAIN_PREDICTIONS = f"../our_data/glg_iso_predictions/{SUFFIX}_train.pt"
+PATH_TEST_PREDICTIONS = f"../our_data/glg_iso_predictions/{SUFFIX}_test.pt"
+PATH_GNN_TRAIN_PREDICTIONS = f"../our_data/gnn_predictions/{SUFFIX}_train.pt"
+PATH_GNN_TEST_PREDICTIONS = f"../our_data/gnn_predictions/{SUFFIX}_test.pt"
+
 if args.split == "train":
     PATH_DATA = f"../our_data/{args.dataset}/{args.split}_indices_size{args.size}_{args.seed}.pkl"
 else:
@@ -121,8 +124,8 @@ def predict(loader):
         predictions += pred.tolist()
     return predictions
 
-pred_proba  = predict_proba(loader)
-pred = pred_proba.argmax(dim=1).tolist()
+gnn_pred_proba  = predict_proba(loader)
+gnn_pred = gnn_pred_proba.argmax(dim=1).tolist()
 
 
 # * ----- Accuracy
@@ -171,28 +174,26 @@ if len(class_present) == 0:
     exit(0)
 elif len(class_present) == 1:
     target_class = class_present[0]
-    acc, preds = test_explanation(
+    acc, glg_iso_preds = test_explanation(
         formula=formulae[0],
         x=concept_vectors,
-        y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in pred]),
+        y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in gnn_pred]),
         target_class=target_class,
         mask=torch.arange(len(indices), dtype=torch.long),
         material=False
     )
 else:
-    acc, preds = test_explanations(
+    acc, glg_iso_preds = test_explanations(
         formulas=formulae,
         x=concept_vectors,
-        y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in pred]),
+        y=torch.LongTensor([[1, 0] if i == 0 else [0, 1] for i in gnn_pred]),
         mask=torch.arange(len(indices), dtype=torch.long),
         material=False
     )
-# try:
-#     f1_score_ = f1_score(y_true=pred, y_pred=preds.tolist(), average="weighted")
-# except AttributeError:
-#     f1_score_ = None
 
-# c0, c1 = torch.LongTensor(pred).unique(return_counts=True)[1].tolist()
-# print(f"Class distribution: {c0 / (c0 + c1)}, {c1 / (c0 + c1)}")
-print(f"Accuracy: {acc}")
-# print(f"F1 score: {f1_score_}")
+if args.split == "train":
+    torch.save(glg_iso_preds, PATH_TRAIN_PREDICTIONS)
+    torch.save(gnn_pred, PATH_GNN_TRAIN_PREDICTIONS)
+else:
+    torch.save(glg_iso_preds, PATH_TEST_PREDICTIONS)
+    torch.save(gnn_pred, PATH_GNN_TEST_PREDICTIONS)

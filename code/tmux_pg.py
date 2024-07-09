@@ -26,10 +26,14 @@ if __name__ == "__main__":
 
     datasets = ["NCI1"] # ["BAMultiShapes", "MUTAG", "Mutagenicity", "NCI1"]
     archs = ["gin"] # ["gcn", "gat", "gin"]
-    poolings = ["max", "mean"] # ["sum", "mean", "max"]
+    poolings = ["sum"] # ["sum", "mean", "max"]
     sizes = [1.0] # [0.05, 0.25, 0.5, 0.75, 1.0]
 
-    cpu = 0
+    total_cpus = 96
+    start_cpu = 30
+    in_hand_cpus = total_cpus - start_cpu
+    cpu = start_cpu
+    counter = 0
     for dataset in datasets:
         for arch in archs:
             for pooling in poolings:
@@ -39,14 +43,17 @@ if __name__ == "__main__":
                     seeds = [45, 357, 796]
                 for seed in seeds:
                     for size in sizes:
+                        cpu = start_cpu + ((counter + 1) % in_hand_cpus)
+                        counter += 1
                         command=f"taskset -c {cpu} python pgexplainer.py -d {dataset} -a {arch} -p {pooling} -s {seed} --size {size}"
-                        log = f"../logs/pg_pool/pg_{dataset}_{arch}_{pooling}_{seed}_{size}.log"
-                        session_name = f"pg_{dataset}_{arch}_{pooling}_{str(seed).replace('.', '_')}_{size}"
+                        log = f"../logs/pg/{dataset}_{arch}_{pooling}_{size}_{seed}"
+                        session_name = f"pg_{dataset}_{arch}_{pooling}_{int(100 * size)}_{seed}"
 
-                        command = f"{command} &> {log}"
+                        command = f"{command} > {log}_1.log 2> {log}_2.log"
                         if arch == "gin":
                             sessions[session_name] = ["conda activate pyg", command]
                         else:
                             sessions[session_name] = ["conda activate glg", command]
-                        cpu = (cpu + 1) % 50
+                        cpu = start_cpu + ((counter + 1) % in_hand_cpus)
+                        counter += 1
     manage_tmux_sessions(sessions)

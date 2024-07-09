@@ -3,6 +3,7 @@ import pickle
 import shutil
 from argparse import ArgumentParser
 from inspect import signature
+from time import process_time
 
 import torch
 import torch_geometric as pyg
@@ -91,6 +92,7 @@ def predict(loader):
         predictions += pred.tolist()
     return predictions
 
+start_time = process_time()
 train_pred_proba = predict_proba(train_loader)
 val_pred_proba   = predict_proba(val_loader)
 test_pred_proba  = predict_proba(test_loader)
@@ -209,3 +211,6 @@ for split in ["train", "val", "test"]:
             pickle.dump(adj_arr, file)
         with open(path_f, "wb") as file:
             pickle.dump(node_features, file)
+
+end_time = process_time()
+print(f"[TIME]: {end_time - start_time} s.ms")

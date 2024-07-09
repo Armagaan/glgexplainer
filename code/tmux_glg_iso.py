@@ -24,12 +24,16 @@ if __name__ == "__main__":
     # Define the sessions and their respective commands
     sessions = {}
 
-    datasets = ["BAMultiShapes"] # ["BAMultiShapes", "MUTAG", "Mutagenicity", "NCI1"]
-    archs = ["gin"] # ["gcn", "gat", "gin"]
+    datasets = ["MUTAG", "Mutagenicity"] # ["MUTAG", "Mutagenicity"]
+    archs = ["gat"] # ["gcn", "gat", "gin"]
     poolings = ["sum"] # ["mean", "max"]
     sizes = [1.0] # [0.05, 0.25, 0.5, 0.75, 1.0]
 
-    cpu = 0
+    total_cpus = 96
+    start_cpu = 40
+    in_hand_cpus = total_cpus - start_cpu
+    cpu = start_cpu
+    counter = 0
     for dataset in datasets:
         for arch in archs:
             for pooling in poolings:
@@ -39,15 +43,16 @@ if __name__ == "__main__":
                     seeds = [45, 357, 796]
                 for seed in seeds:
                     for size in sizes:
-                        command=f"taskset -c {cpu} python acc_isomorphism.py -e PGExplainer --split test -r 0 -d {dataset} -a {arch} -p {pooling} -s {seed} --size {size}"
-                        log=f"../logs/acc_iso/{dataset}_PGExplainer_size{size}_seed{seed}_run0_{arch}_{pooling}.log"
+                        command=f"taskset -c {cpu} python glg_iso.py -e PGExplainer --split test -r 0 -d {dataset} -a {arch} -p {pooling} -s {seed} --size {size}"
+                        log = f"../logs/glg_iso/pgexplainer_{dataset}_{arch}_{pooling}_{size}_{seed}"
                         
-                        session_name = f"glg_iso_{dataset}_{arch}_{pooling}_{seed}_{size}"
-                        command = f"{command} &> {log}"
-                        
+                        session_name = f"glg_iso_{dataset}_{arch}_{pooling}_{int(100 * size)}_{seed}"
+                        command = f"{command} > {log}_1.log 2> {log}_2.log"
+
                         if arch == "gin":
                             sessions[session_name] = ["conda activate pyg", command]
                         else:
                             sessions[session_name] = ["conda activate glg", command]
-                        cpu = (cpu + 1) % 50
+                        cpu = start_cpu + ((counter + 1) % in_hand_cpus)
+                        counter += 1
     manage_tmux_sessions(sessions)

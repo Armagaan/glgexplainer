@@ -29,7 +29,14 @@ if __name__ == "__main__":
     poolings = ["sum"] # ["sum", "mean", "max"]
     sizes = [1.0] # [0.05, 0.25, 0.5, 0.75]
 
-    cpu = 30
+    # Is glg trained?
+    trained = False
+
+    total_cpus = 96
+    start_cpu = 80
+    in_hand_cpus = total_cpus - start_cpu
+    cpu = start_cpu
+    counter = 0
     for dataset in datasets:
         for arch in archs:
             for pooling in poolings:
@@ -39,12 +46,14 @@ if __name__ == "__main__":
                     seeds = [45, 357, 796]
                 for seed in seeds:
                     for size in sizes:
-                        #! passed -t
-                        command=f"taskset -c {cpu} python glg_{dataset}.py -t -d cpu -s {seed} -r 0 --size {size} -e PGExplainer -a {arch} -p {pooling}"
-                        log=f"../logs/acc_pool/{dataset}_PGExplainer_size{size}_seed{seed}_run_{arch}_{pooling}.log"
-                        session_name = f"glg_{dataset}_{arch}_{pooling}_{seed}_{str(size).replace('.', '_')}"
+                        command=f"taskset -c {cpu} python glg_{dataset}.py -d cpu -s {seed} -r 0 --size {size} -e PGExplainer -a {arch} -p {pooling}"
+                        if trained:
+                            command += " -t"
+                        log = f"../logs/glg/pgexplainer_{dataset}_{arch}_{pooling}_{size}_{seed}"
+                        session_name = f"glg_{dataset}_{arch}_{pooling}_{int(100 * size)}_{seed}"
 
-                        # command = f"{command} &> {log}"
+                        command = f"{command} > {log}_1.log 2> {log}_2.log"
                         sessions[session_name] = ["conda activate glg", command]
-                        cpu = (cpu + 1) % 95
+                        cpu = start_cpu + ((counter + 1) % in_hand_cpus)
+                        counter += 1
     manage_tmux_sessions(sessions)

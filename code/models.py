@@ -1,3 +1,4 @@
+from copy import deepcopy
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, GCNConv, global_mean_pool, global_add_pool, global_max_pool, GINConv, GATv2Conv, GraphConv
@@ -5,7 +6,7 @@ from torch_scatter import scatter
 import torch_explain as te
 from torch_explain.logic.nn import entropy
 from torch_explain.logic.metrics import test_explanation, test_explanations
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 from sklearn.decomposition import PCA
 from scipy.stats import hmean
 import matplotlib.pyplot as plt
@@ -328,14 +329,28 @@ class GLGExplainer(torch.nn.Module):
                 self.explanations_raw[0] = explanation_raw
 
             accuracy0, preds = test_explanation(explanation0, x_train, y_train_1h, target_class=0, mask=torch.arange(x_train.shape[0]).long(), material=False)
-            
+
             cluster_accs = utils.get_cluster_accuracy(concept_predictions, le_classes)
             if testing_formulae:
+                if preds is None:
+                    report = None
+                else:
+                    target_class = 0
+                    mask_report = torch.arange(x_train.shape[0]).long()
+                    y_report = y_train_1h[:, target_class][mask_report]
+                    preds_report = deepcopy(preds[mask_report])
+                    for i in range(len(y_report)):
+                        if preds_report[i] == -1:
+                            preds_report[i] = abs(y_report[i] - 1)
+                    report = classification_report(y_true=y_report, y_pred=preds_report)
+
                 print(f"Concept Purity: {np.mean(cluster_accs):2f} +- {np.std(cluster_accs):2f}")
                 print("Concept distribution: ", np.unique(concept_predictions, return_counts=True))        
                 print("Logic formulas:")
+
                 print("For class 0:")
-                print(accuracy0)
+                print("Classification report\n", report)
+                print("Accuracy:", accuracy0)
                 print("Formula:", explanation0)
                 print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
 
@@ -347,10 +362,23 @@ class GLGExplainer(torch.nn.Module):
                 self.explanations[1] = explanation1
                 self.explanations_raw[1] = explanation_raw
             accuracy1, preds = test_explanation(explanation1, x_train, y_train_1h, target_class=1, mask=torch.arange(x_train.shape[0]).long(), material=False)
-            
+
             if testing_formulae:
-                print("For class 1:")
-                print(accuracy1)
+                if preds is None:
+                    report = None
+                else:
+                    target_class = 1
+                    mask_report = torch.arange(x_train.shape[0]).long()
+                    y_report = y_train_1h[:, target_class][mask_report]
+                    preds_report = deepcopy(preds[mask_report])
+                    for i in range(len(y_report)):
+                        if preds_report[i] == -1:
+                            preds_report[i] = abs(y_report[i] - 1)
+                    report = classification_report(y_true=y_report, y_pred=preds_report)
+                
+                print("For class 1")
+                print("Classification report:\n", report)
+                print("Accuracy:", accuracy1)
                 print("Formula:", explanation1)
                 print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
 
@@ -366,7 +394,8 @@ class GLGExplainer(torch.nn.Module):
                 
                 if testing_formulae:
                     print("For class 2:")
-                    print(accuracy2)
+                    print("Classification report:\n", report)
+                    print("Accuracy:", accuracy2)
                     print("Formula:", explanation2)
                     print("Rewritten formula:", utils.rewrite_formula_to_close(utils.assemble_raw_explanations(explanation_raw)))
                 accuracy, preds = test_explanations([explanation0, explanation1, explanation2], x_train, y_train_1h, mask=torch.arange(x_train.shape[0]).long(), material=False)
@@ -374,8 +403,22 @@ class GLGExplainer(torch.nn.Module):
             else:
                 accuracy, preds = test_explanations([explanation0, explanation1], x_train, y_train_1h, mask=torch.arange(x_train.shape[0]).long(), material=False)
                 logic_acc = hmean([accuracy0, accuracy1])
+                combined_preds = preds
 
             if testing_formulae:
+                if preds is None:
+                    report = None
+                else:
+                    mask_report = torch.arange(x_train.shape[0]).long()
+                    y_report = y_train_1h.argmax(dim=-1)
+                    preds_report = deepcopy(preds[mask_report])
+                    for i in range(len(y_report)):
+                        if preds_report[i] == -1:
+                            preds_report[i] = abs(y_report[i] - 1)
+                    report = classification_report(y_true=y_report, y_pred=preds_report)
+
+                print("For all classes:")
+                print("Classification report:\n", report)
                 # Accuracy is wrt formula. Fidelity is wrt LEN model.
                 print("Accuracy as classifier: ", round(accuracy, 4))
                 print("LEN fidelity: ", sum(y_train_1h[:, :].eq(y_pred[:, :] > 0).sum(1) == self.num_classes) / len(y_pred))
@@ -388,6 +431,8 @@ class GLGExplainer(torch.nn.Module):
                 else:
                     self.val_logic_metrics.append({'logic_acc': logic_acc, "logic_acc_clf": accuracy, "concept_purity": np.mean(cluster_accs), "concept_purity_std": np.std(cluster_accs)})
         self.len_model.to(self.device)
+        if testing_formulae:
+            return combined_preds
 
 
     def compute_losses(self, le_embeddings, prototype_assignements, total_losses, concept_vector, y_train_1h, le_y):

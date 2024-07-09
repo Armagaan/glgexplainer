@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from pickle import dump, load
+from time import process_time
 
 from local_explanations import *
 import utils
@@ -36,12 +37,16 @@ DATASET_NAME = "BAMultiShapes"
 with open("../config/" + DATASET_NAME + "_params.json") as json_file:
     hyper_params = json.load(json_file)
 
-SUFFIX = f"{DATASET_NAME}_{args.explainer}_size{args.size}_seed{args.seed}_run{args.run}_{args.arch}_{args.pooling}"
+SUFFIX = f"{DATASET_NAME}_{args.explainer}_{args.arch}_{args.pooling}_size{args.size}_seed{args.seed}_run{args.run}"
 PATH_GLG_MODEL = f"../our_data/trained_glg_models/{SUFFIX}.pt"
 PATH_GLG_PLOT = f"../our_data/plots/{SUFFIX}.png"
 PATH_GLG_PLOT_RANDOM = f"../our_data/plots_random/{SUFFIX}.png"
 PATH_CONCEPTS = f"../our_data/concepts/{SUFFIX}.pkl"
 PATH_FORMULAE = f"../our_data/formulae/{SUFFIX}.pkl"
+PATH_TRAIN_PREDICTIONS = f"../our_data/glg_predictions/{SUFFIX}_train.pt"
+PATH_TEST_PREDICTIONS = f"../our_data/glg_predictions/{SUFFIX}_test.pt"
+
+start_time = process_time()
 
 adjs_train, \
 edge_weights_train, \
@@ -142,11 +147,15 @@ else:
 expl.eval()
 
 print(">>> Inspect train set")
-expl.inspect(train_group_loader, testing_formulae=True)
+train_pred = expl.inspect(train_group_loader, testing_formulae=True)
+torch.save(train_pred, PATH_TRAIN_PREDICTIONS)
 
 print(">>> Inspect test set")
-expl.inspect(test_group_loader, testing_formulae=True)
+test_pred = expl.inspect(test_group_loader, testing_formulae=True)
+torch.save(test_pred, PATH_TEST_PREDICTIONS)
 
+end_time = process_time()
+print(f"[TIME]: {end_time - start_time} s.ms")
 
 # * Materialize prototypes
 print("\n>>> Visualize")
